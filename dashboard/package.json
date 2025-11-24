@@ -1,0 +1,12 @@
+{
+  "name": "chromium-build-tracker-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard for tracking Chromium build changes",
+  "scripts": {
+    "build": "tsc app.ts --outFile app.js --target ES2017 --lib ES2017,DOM",
+    "watch": "tsc app.ts --outFile app.js --target ES2017 --lib ES2017,DOM --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
