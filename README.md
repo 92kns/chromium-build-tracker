@@ -1,6 +1,6 @@
 # Chromium Build Tracker
 
-Tracks changes in Chromium build instructions that might affect your custom Chromium builds.
+Tracks changes in Chromium build instructions and key files that might affect your custom Chromium builds.
 
 ## What it tracks
 
@@ -27,7 +27,7 @@ Tracks changes in Chromium build instructions that might affect your custom Chro
 
 ## Why this exists
 
-At your company, you build custom Chromium in CI that sometimes breaks for obscure reasons. This tool helps you:
+Chromium sometimes breaks for obscure reasons. This tool helps you:
 - **Track changes** to build instructions automatically
 - **Get alerts** when something changes that might affect your builds
 - **View diffs** to see exactly what changed
@@ -90,7 +90,7 @@ The dashboard has **3 tabs**:
 - Change cards with summaries and links
 - Diff viewer: Click "View Diff" to see exact changes
 
-**2. Commit History** ⭐ NEW!
+**2. Commit History** 
 - **Interactive date range picker** - Query any time period
 - **Quick ranges** - Last 7/30/90 days with one click
 - **Live GitHub API fetching** - No backend needed!
@@ -151,42 +151,7 @@ docs/windows_build_instructions.md
 4. **Changes log** stores all detected changes in `data/changes.json`
 5. **Dashboard** reads the changes and displays them with filters and diffs
 
-## Running automatically
 
-### GitHub Actions (recommended)
-
-Create `.github/workflows/track-chromium.yml`:
-
-```yaml
-name: Track Chromium Changes
-
-on:
-  schedule:
-    - cron: '0 0 * * *'  # Daily at midnight UTC
-  workflow_dispatch:  # Manual trigger
-
-jobs:
-  track:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - run: pip install -r scraper/requirements.txt
-      - run: python3 scraper/main.py fetch
-      - uses: actions/upload-artifact@v3
-        with:
-          name: changes
-          path: data/
-```
-
-### Cron job (local)
-
-```bash
-# Add to crontab (run daily at 9 AM)
-0 9 * * * cd /path/to/chromium_detect && python3 scraper/main.py fetch
-```
 
 ## Project structure
 
