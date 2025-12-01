@@ -1,0 +1,55 @@
+name: Fetch and Deploy Dashboard
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  fetch-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for all branches
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r scraper/requirements.txt
+
+      - name: Fetch Chromium changes
+        run: python3 scraper/main.py fetch
+
+      - name: Deploy to GitHub Pages
+        run: |
+          # Configure git
+          git config user.name "KS"
+          git config user.email "ks@local"
+
+          # Switch to gh-pages branch
+          git checkout gh-pages
+
+          # Copy updated files from main
+          git checkout main -- dashboard/index.html dashboard/app.js dashboard/styles.css data/changes.json
+
+          # Move dashboard files to root
+          mv dashboard/* . 2>/dev/null || true
+          rm -rf dashboard data
+
+          # Commit and push if there are changes
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to deploy"
+          else
+            git commit -m "Update dashboard from main - $(date -u +%Y-%m-%d)"
+            git push origin gh-pages
+          fi
