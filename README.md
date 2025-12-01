@@ -21,9 +21,8 @@ Tracks changes in Chromium build instructions and key files that might affect yo
 - `build/install-build-deps.py` - Linux dependency installer (Python)
 - `build/vs_toolchain.py` - Windows Visual Studio setup
 - `build/mac_toolchain.py` - macOS Xcode setup
-- `.vpython3` - Python dependencies specification
 
-**Total: 13 files tracked** (4 docs + 9 critical build files)
+**Total: 12 files tracked** (4 docs + 8 critical build files)
 
 ## Why this exists
 

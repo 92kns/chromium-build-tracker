@@ -21,9 +21,6 @@ CHROMIUM_BUILD_CONFIGS = [
     "build/install-build-deps.py",  # Linux dependency installer (Python)
     "build/vs_toolchain.py",  # Windows Visual Studio setup
     "build/mac_toolchain.py",  # macOS Xcode setup
-
-    # Python environment specs that can break scripts
-    ".vpython3",  # Python dependencies spec
 ]
 
 # Combined list for fetching
