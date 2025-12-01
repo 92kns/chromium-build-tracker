@@ -3,6 +3,7 @@
 import os
 import json
 import difflib
+import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -96,6 +97,42 @@ class ChangeDetector:
 
         return changes
 
+    def _filter_deps_content(self, content: str) -> str:
+        """
+        Filter DEPS file to only include platform-relevant sections
+
+        Args:
+            content: Full DEPS file content
+
+        Returns:
+            Filtered content with only relevant platforms
+        """
+        lines = content.splitlines(keepends=True)
+        filtered_lines = []
+        include_line = True
+        platform_keywords = ['windows', 'win', 'linux', 'mac', 'darwin', 'android']
+
+        for line in lines:
+            lower_line = line.lower()
+
+            # Check if line mentions any relevant platform
+            has_relevant_platform = any(keyword in lower_line for keyword in platform_keywords)
+
+            # Skip lines that mention other platforms (like iOS, fuchsia, etc)
+            skip_platforms = ['ios', 'fuchsia', 'chromeos', 'lacros']
+            has_skip_platform = any(keyword in lower_line for keyword in skip_platforms)
+
+            # Include lines that either:
+            # 1. Don't mention any platform (general config)
+            # 2. Mention a relevant platform
+            # And don't mention skip platforms
+            if has_skip_platform and not has_relevant_platform:
+                continue
+
+            filtered_lines.append(line)
+
+        return ''.join(filtered_lines)
+
     def _detect_repo_changes(self, repo_name: str, new_files: Dict, old_files: Dict) -> List[Dict]:
         """
         Detect changes for a specific repository
@@ -144,6 +181,11 @@ class ChangeDetector:
         for file_path in common_files:
             old_content = old_files[file_path]['content']
             new_content = new_files[file_path]['content']
+
+            # Apply DEPS filtering if this is the DEPS file
+            if file_path == 'DEPS':
+                old_content = self._filter_deps_content(old_content)
+                new_content = self._filter_deps_content(new_content)
 
             if old_content != new_content:
                 diff_html = self._generate_diff(old_content, new_content, file_path)

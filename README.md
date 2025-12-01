@@ -12,6 +12,7 @@ Tracks changes in Chromium build instructions and key files that might affect yo
 
 **Critical build configuration files:**
 - `DEPS` - Main dependency file (GN, clang, buildtools versions)
+  - *Filtered to show only Windows, Linux, Mac/Darwin, and Android changes*
 - `build/config/android/config.gni` - Android NDK/SDK versions
 - `build/config/mac/mac_sdk.gni` - macOS SDK and deployment target
 - `build/config/win/visual_studio_version.gni` - Windows SDK/MSVC versions
