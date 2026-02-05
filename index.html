@@ -10,58 +10,18 @@
     <div class="container">
         <header>
             <h1>🔧 Chromium Build Tracker</h1>
-            <p class="subtitle">Tracking changes in Chromium build instructions</p>
+            <p class="subtitle">Commit history for Chromium, V8, and depot_tools</p>
         </header>
 
-        <!-- Tab Navigation -->
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="tracked">Tracked Changes</button>
-            <button class="tab-btn" data-tab="history">Commit History</button>
-            <button class="tab-btn" data-tab="settings">Settings</button>
-        </div>
-
-        <!-- Tracked Changes Tab -->
-        <div id="tracked-tab" class="tab-content active">
-            <div id="stats" class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number" id="total-changes">0</div>
-                    <div class="stat-label">Total Changes</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="chromium-changes">0</div>
-                    <div class="stat-label">Chromium Docs</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="depot-tools-changes">0</div>
-                    <div class="stat-label">depot_tools</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="last-check">Never</div>
-                    <div class="stat-label">Last Check</div>
-                </div>
-            </div>
-
-            <div class="filters">
-                <button class="filter-btn active" data-filter="all">All</button>
-                <button class="filter-btn" data-filter="chromium">Chromium</button>
-                <button class="filter-btn" data-filter="depot_tools">depot_tools</button>
-                <button class="filter-btn" data-filter="added">Added</button>
-                <button class="filter-btn" data-filter="modified">Modified</button>
-                <button class="filter-btn" data-filter="removed">Removed</button>
-            </div>
-
-            <div id="changes-list" class="changes-list">
-                <!-- Changes will be populated here -->
-            </div>
-
-            <div id="no-changes" class="no-changes" style="display: none;">
-                <p>No changes detected yet. Run <code>python scraper/main.py fetch</code> to start tracking.</p>
-            </div>
-        </div>
-
-        <!-- Commit History Tab -->
-        <div id="history-tab" class="tab-content">
+        <!-- Commit History -->
+        <div id="history-tab" class="tab-content active">
             <div class="history-controls">
+                <div class="repo-selector-group">
+                    <label for="repo-selector">Repository:</label>
+                    <select id="repo-selector" class="repo-selector">
+                        <!-- Options populated by JavaScript -->
+                    </select>
+                </div>
                 <div class="date-picker-group">
                     <div class="date-input-group">
                         <label for="since-date">From:</label>
@@ -83,6 +43,10 @@
 
             <div id="history-status" class="history-status"></div>
 
+            <div id="log-panel" class="log-panel">
+                <!-- Logs will be populated here -->
+            </div>
+
             <div id="history-list" class="history-list">
                 <!-- Commit history will be populated here -->
             </div>
@@ -92,43 +56,6 @@
             </div>
         </div>
 
-        <!-- Settings Tab -->
-        <div id="settings-tab" class="tab-content">
-            <div class="settings-section">
-                <h2>GitHub API Token (Optional)</h2>
-                <p>Provide a GitHub personal access token to increase rate limits from 60 to 5000 requests/hour.</p>
-                <p>The token is stored only in your browser's localStorage and never sent anywhere except GitHub API.</p>
-
-                <div class="token-input-group">
-                    <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx" />
-                    <button id="save-token-btn" class="btn btn-primary">Save Token</button>
-                    <button id="clear-token-btn" class="btn">Clear Token</button>
-                </div>
-
-                <div id="token-status" class="token-status"></div>
-
-                <div class="info-box">
-                    <h3>How to create a token:</h3>
-                    <ol>
-                        <li>Go to <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings → Developer settings → Personal access tokens</a></li>
-                        <li>Click "Generate new token (classic)"</li>
-                        <li>Give it a name like "Chromium Build Tracker"</li>
-                        <li>No special permissions needed (leave all checkboxes unchecked)</li>
-                        <li>Click "Generate token" and copy it</li>
-                        <li>Paste it here</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="diff-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <div id="diff-viewer">
-                <!-- Diff will be displayed here -->
-            </div>
-        </div>
     </div>
 
     <script src="app.js"></script>

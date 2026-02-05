@@ -1,63 +1,119 @@
 /**
  * Chromium Build Tracker Dashboard
  */
-const CHROMIUM_FILES = [
-    // Build documentation
-    'docs/linux/build_instructions.md',
-    'docs/mac_build_instructions.md',
-    'docs/windows_build_instructions.md',
-    'docs/android_build_instructions.md',
-    // Critical build configs (Tier 1)
-    'DEPS',
-    'build/config/android/config.gni',
-    'build/config/mac/mac_sdk.gni',
-    'build/config/win/visual_studio_version.gni',
-    // Toolchain setup scripts (Tier 2)
-    'build/install-build-deps.sh',
-    'build/install-build-deps.py',
-    'build/vs_toolchain.py',
-    'build/mac_toolchain.py',
-    '.vpython3'
-];
-class GitHubAPI {
+class Logger {
     constructor() {
-        this.baseUrl = 'https://api.github.com';
-        this.repo = 'chromium/chromium';
-        this.token = null;
-        // Load token from localStorage if available
-        this.token = localStorage.getItem('github_token');
+        this.logPanel = document.getElementById('log-panel');
     }
-    setToken(token) {
-        this.token = token;
-        localStorage.setItem('github_token', token);
-    }
-    clearToken() {
-        this.token = null;
-        localStorage.removeItem('github_token');
-    }
-    hasToken() {
-        return this.token !== null && this.token.length > 0;
-    }
-    async fetch(url) {
-        const headers = {
-            'Accept': 'application/vnd.github.v3+json'
-        };
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
-        }
-        const response = await fetch(url, { headers });
-        if (response.status === 403) {
-            const resetTime = response.headers.get('X-RateLimit-Reset');
-            if (resetTime) {
-                const resetDate = new Date(parseInt(resetTime) * 1000);
-                throw new Error(`Rate limit exceeded. Resets at ${resetDate.toLocaleTimeString()}. Consider adding a GitHub token in Settings.`);
+    log(message, level = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        const logMessage = `[${timestamp}] ${message}`;
+        // Console logging
+        const consoleMethod = level === 'error' ? console.error : level === 'warning' ? console.warn : console.log;
+        consoleMethod(logMessage);
+        // UI logging
+        if (this.logPanel) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${level}`;
+            entry.innerHTML = `<span class="log-timestamp">${timestamp}</span>${message}`;
+            this.logPanel.appendChild(entry);
+            // Auto-scroll to bottom
+            this.logPanel.scrollTop = this.logPanel.scrollHeight;
+            // Keep only last 50 entries
+            while (this.logPanel.children.length > 50) {
+                this.logPanel.removeChild(this.logPanel.firstChild);
             }
-            throw new Error('Rate limit exceeded. Consider adding a GitHub token in Settings.');
         }
+    }
+    clear() {
+        if (this.logPanel) {
+            this.logPanel.innerHTML = '';
+        }
+    }
+}
+const REPO_CONFIGS = [
+    {
+        id: 'chromium',
+        name: 'Chromium',
+        github: {
+            owner: 'chromium',
+            repo: 'chromium'
+        },
+        gitiles: {
+            host: 'chromium.googlesource.com',
+            project: 'chromium/src'
+        },
+        files: [
+            'docs/linux/build_instructions.md',
+            'docs/mac_build_instructions.md',
+            'docs/windows_build_instructions.md',
+            'docs/android_build_instructions.md',
+            'DEPS',
+            'build/config/android/config.gni',
+            'build/config/mac/mac_sdk.gni',
+            'build/config/win/visual_studio_version.gni',
+            'build/install-build-deps.sh',
+            'build/install-build-deps.py',
+            'build/vs_toolchain.py',
+            'build/mac_toolchain.py',
+            '.vpython3'
+        ]
+    },
+    {
+        id: 'v8',
+        name: 'V8 Engine',
+        github: {
+            owner: 'v8',
+            repo: 'v8'
+        },
+        gitiles: {
+            host: 'chromium.googlesource.com',
+            project: 'v8/v8'
+        },
+        files: [
+            'README.md',
+            'DEPS',
+            'BUILD.gn',
+            'infra/mb/mb_config.pyl',
+            'tools/dev/gm.py',
+            'tools/dev/v8gen.py'
+        ]
+    },
+    {
+        id: 'depot_tools',
+        name: 'depot_tools',
+        // No GitHub mirror exists, Gitiles only
+        gitiles: {
+            host: 'chromium.googlesource.com',
+            project: 'chromium/tools/depot_tools'
+        },
+        files: [
+            'README.md',
+            'gclient.py',
+            'gclient_utils.py',
+            'git_cl.py',
+            'autoninja.py',
+            'cipd_manifest.txt'
+        ]
+    }
+];
+// Legacy constant for backwards compatibility
+const CHROMIUM_FILES = REPO_CONFIGS[0].files;
+class GitHubAPI {
+    constructor(config) {
+        this.baseUrl = 'https://api.github.com';
+        this.config = config;
+    }
+    async fetchJson(url) {
+        const response = await fetch(url, {
+            headers: {
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
         if (!response.ok) {
             throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
         }
-        return response;
+        return response.json();
     }
     async fetchCommits(filePath, since, until) {
         const params = new URLSearchParams({
@@ -68,56 +124,319 @@ class GitHubAPI {
             params.append('since', since);
         if (until)
             params.append('until', until);
-        const url = `${this.baseUrl}/repos/${this.repo}/commits?${params}`;
+        const url = `${this.baseUrl}/repos/${this.config.github.owner}/${this.config.github.repo}/commits?${params}`;
+        const data = await this.fetchJson(url);
+        return data.map(commit => ({
+            sha: commit.sha.substring(0, 7),
+            message: commit.commit.message.split('\n')[0],
+            author: commit.commit.author.name,
+            date: commit.commit.author.date,
+            url: commit.html_url
+        }));
+    }
+    async checkIfStale() {
         try {
-            const response = await this.fetch(url);
-            const data = await response.json();
-            return data.map(commit => ({
-                sha: commit.sha.substring(0, 7),
-                message: commit.commit.message.split('\n')[0],
-                author: commit.commit.author.name,
-                date: commit.commit.author.date,
-                url: commit.html_url
+            // Fetch recent commits from main branch
+            const url = `${this.baseUrl}/repos/${this.config.github.owner}/${this.config.github.repo}/commits?per_page=1`;
+            console.log(`[GitHub] Checking staleness for ${this.config.name}...`);
+            const data = await this.fetchJson(url);
+            if (data.length === 0) {
+                console.log(`[GitHub] No commits found for ${this.config.name}, considering stale`);
+                return true;
+            }
+            const lastCommitDate = new Date(data[0].commit.author.date);
+            const now = new Date();
+            const daysSinceLastCommit = (now.getTime() - lastCommitDate.getTime()) / (1000 * 60 * 60 * 24);
+            const isStale = daysSinceLastCommit > 3;
+            console.log(`[GitHub] ${this.config.name} last commit: ${daysSinceLastCommit.toFixed(1)} days ago - ${isStale ? 'STALE' : 'FRESH'}`);
+            return isStale;
+        }
+        catch (error) {
+            console.error(`[GitHub] Error checking staleness for ${this.config.name}:`, error);
+            return true;
+        }
+    }
+}
+class GitilesAPI {
+    constructor(config) {
+        this.baseUrl = '/api/gitiles';
+        this.config = config;
+    }
+    async fetchJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Gitiles API error: ${response.status} ${response.statusText}`);
+        }
+        const text = await response.text();
+        // Remove XSSI protection prefix
+        const jsonText = text.startsWith(')]}\'\n') ? text.substring(5) : text;
+        return JSON.parse(jsonText);
+    }
+    async fetchCommits(filePath, since, until) {
+        const url = `${this.baseUrl}/${this.config.gitiles.host}/${this.config.gitiles.project}/+log/main/${filePath}?format=json&n=100`;
+        try {
+            const data = await this.fetchJson(url);
+            let commits = data.log.map(commit => ({
+                sha: commit.commit.substring(0, 7),
+                message: commit.message.split('\n')[0],
+                author: commit.author.name,
+                date: this.parseGitilesDate(commit.author.time),
+                url: `https://${this.config.gitiles.host}/${this.config.gitiles.project}/+/${commit.commit}`
             }));
+            // Filter by date range if specified
+            if (since || until) {
+                const sinceDate = since ? new Date(since) : null;
+                const untilDate = until ? new Date(until) : null;
+                commits = commits.filter(commit => {
+                    const commitDate = new Date(commit.date);
+                    if (sinceDate && commitDate < sinceDate)
+                        return false;
+                    if (untilDate && commitDate > untilDate)
+                        return false;
+                    return true;
+                });
+            }
+            return commits;
         }
         catch (error) {
             console.error(`Error fetching commits for ${filePath}:`, error);
             throw error;
         }
     }
-    async fetchAllCommits(since, until) {
+    parseGitilesDate(dateStr) {
+        // Gitiles returns dates like "Thu Dec 11 07:08:43 2025"
+        // Convert to ISO format
+        const date = new Date(dateStr);
+        return date.toISOString();
+    }
+    async fetchAllCommits(since, until, onProgress) {
         const results = new Map();
-        for (const filePath of CHROMIUM_FILES) {
-            try {
-                const commits = await this.fetchCommits(filePath, since, until);
+        // Fetch in parallel with concurrency limit
+        const concurrency = 10; // High concurrency for faster fetching
+        const files = [...CHROMIUM_FILES];
+        let completed = 0;
+        for (let i = 0; i < files.length; i += concurrency) {
+            const batch = files.slice(i, i + concurrency);
+            const promises = batch.map(filePath => this.fetchCommits(filePath, since, until)
+                .then(commits => {
                 if (commits.length > 0) {
                     results.set(filePath, commits);
                 }
+                completed++;
+                if (onProgress) {
+                    onProgress(completed, files.length);
+                }
+            })
+                .catch(error => {
+                console.error(`Failed to fetch commits for ${filePath}:`, error);
+                completed++;
+                if (onProgress) {
+                    onProgress(completed, files.length);
+                }
+            }));
+            await Promise.all(promises);
+        }
+        return results;
+    }
+}
+class HybridAPI {
+    constructor(config, logger) {
+        this.cacheExpiryMs = 10 * 60 * 1000; // 10 minutes
+        this.config = config;
+        this.logger = logger;
+        this.githubAPI = new GitHubAPI(config);
+        this.gitilesAPI = new GitilesAPI(config);
+    }
+    getCacheKey(since, until) {
+        return `cache_${this.config.id}_${since || 'none'}_${until || 'none'}`;
+    }
+    getCached(since, until) {
+        try {
+            const key = this.getCacheKey(since, until);
+            const cached = localStorage.getItem(key);
+            if (!cached)
+                return null;
+            const entry = JSON.parse(cached);
+            const age = Date.now() - entry.timestamp;
+            if (age > this.cacheExpiryMs) {
+                localStorage.removeItem(key);
+                return null;
+            }
+            // Convert plain object back to Map
+            const commitsMap = new Map();
+            const commitsObj = entry.commits;
+            for (const key in commitsObj) {
+                if (commitsObj.hasOwnProperty(key)) {
+                    commitsMap.set(key, commitsObj[key]);
+                }
+            }
+            entry.commits = commitsMap;
+            return entry;
+        }
+        catch (e) {
+            return null;
+        }
+    }
+    setCache(commits, source, since, until) {
+        try {
+            const key = this.getCacheKey(since, until);
+            const entry = {
+                commits,
+                source,
+                timestamp: Date.now()
+            };
+            // Convert Map to plain object for JSON
+            const commitsObj = {};
+            commits.forEach((value, key) => {
+                commitsObj[key] = value;
+            });
+            const cacheData = {
+                commits: commitsObj,
+                source: entry.source,
+                timestamp: entry.timestamp
+            };
+            localStorage.setItem(key, JSON.stringify(cacheData));
+        }
+        catch (e) {
+            // Ignore cache write errors (quota exceeded, etc.)
+            console.warn('Failed to cache results:', e);
+        }
+    }
+    async fetchAllCommits(since, until, signal, onProgress) {
+        // Check cache first
+        const cached = this.getCached(since, until);
+        if (cached) {
+            this.logger.log(`Using cached results for ${this.config.name} (less than 10 min old)`, 'success');
+            return { commits: cached.commits, source: cached.source };
+        }
+        this.logger.log(`Fetching commits for ${this.config.name}`, 'info');
+        // Check if cancelled
+        if (signal === null || signal === void 0 ? void 0 : signal.aborted) {
+            throw new DOMException('Fetch aborted', 'AbortError');
+        }
+        // Try GitHub first (if available)
+        if (this.config.github) {
+            try {
+                this.logger.log('Checking GitHub mirror status...', 'info');
+                // Check if cancelled
+                if (signal === null || signal === void 0 ? void 0 : signal.aborted) {
+                    throw new DOMException('Fetch aborted', 'AbortError');
+                }
+                const isStale = await this.githubAPI.checkIfStale();
+                if (!isStale) {
+                    this.logger.log('GitHub mirror is fresh - using GitHub API (fast)', 'success');
+                    const commits = await this.fetchFromGitHub(since, until, signal, onProgress);
+                    this.logger.log(`Fetched ${commits.size} files with commits from GitHub`, 'success');
+                    // Cache the results
+                    this.setCache(commits, 'github', since, until);
+                    return { commits, source: 'github' };
+                }
+                else {
+                    this.logger.log('GitHub mirror is stale (>3 days old) - falling back to Gitiles', 'warning');
+                }
             }
             catch (error) {
-                console.error(`Failed to fetch commits for ${filePath}:`, error);
-                // Continue with other files
+                // Re-throw abort errors
+                if (error instanceof DOMException && error.name === 'AbortError') {
+                    throw error;
+                }
+                this.logger.log(`GitHub API failed: ${error}`, 'error');
+                this.logger.log('Falling back to Gitiles API', 'warning');
             }
+        }
+        else {
+            this.logger.log('No GitHub mirror available - using Gitiles only', 'info');
+        }
+        // Check if cancelled before Gitiles
+        if (signal === null || signal === void 0 ? void 0 : signal.aborted) {
+            throw new DOMException('Fetch aborted', 'AbortError');
+        }
+        // Fallback to Gitiles (or primary if no GitHub)
+        this.logger.log('Using Gitiles API (slower but always current)', 'info');
+        const commits = await this.gitilesAPI.fetchAllCommits(since, until, (current, total) => {
+            // Check if cancelled during fetch
+            if (signal === null || signal === void 0 ? void 0 : signal.aborted)
+                return;
+            if (onProgress)
+                onProgress(current, total, 'gitiles');
+        });
+        this.logger.log(`Fetched ${commits.size} files with commits from Gitiles`, 'success');
+        // Cache the results
+        this.setCache(commits, 'gitiles', since, until);
+        return { commits, source: 'gitiles' };
+    }
+    async fetchFromGitHub(since, until, signal, onProgress) {
+        const results = new Map();
+        const concurrency = 10; // High concurrency for faster fetching
+        const files = [...this.config.files];
+        let completed = 0;
+        console.log(`[${this.config.name}] Fetching ${files.length} files from GitHub...`);
+        for (let i = 0; i < files.length; i += concurrency) {
+            // Check if cancelled before each batch
+            if (signal === null || signal === void 0 ? void 0 : signal.aborted) {
+                throw new DOMException('Fetch aborted', 'AbortError');
+            }
+            const batch = files.slice(i, i + concurrency);
+            const promises = batch.map(filePath => this.githubAPI.fetchCommits(filePath, since, until)
+                .then(commits => {
+                // Check if cancelled
+                if (signal === null || signal === void 0 ? void 0 : signal.aborted)
+                    return;
+                if (commits.length > 0) {
+                    results.set(filePath, commits);
+                }
+                completed++;
+                if (onProgress) {
+                    onProgress(completed, files.length, 'github');
+                }
+            })
+                .catch(error => {
+                // Don't log errors if aborted
+                if (signal === null || signal === void 0 ? void 0 : signal.aborted)
+                    return;
+                console.error(`[${this.config.name}] Failed to fetch ${filePath}:`, error);
+                completed++;
+                if (onProgress) {
+                    onProgress(completed, files.length, 'github');
+                }
+            }));
+            await Promise.all(promises);
         }
         return results;
     }
 }
 class Dashboard {
     constructor() {
-        this.changes = [];
-        this.currentFilter = 'all';
-        this.githubAPI = new GitHubAPI();
+        this.currentFetchAbort = null;
+        this.logger = new Logger();
+        this.currentRepo = REPO_CONFIGS[0]; // Default to Chromium
+        this.hybridAPI = new HybridAPI(this.currentRepo, this.logger);
         this.init();
     }
     async init() {
-        this.setupTabs();
-        this.setupSettings();
+        this.setupRepoSelector();
         this.setupHistoryControls();
-        // Load tracked changes
-        await this.loadChanges();
-        this.updateStats();
-        this.renderChanges();
-        this.setupChangeListeners();
+    }
+    setupRepoSelector() {
+        const selector = document.getElementById('repo-selector');
+        if (!selector)
+            return;
+        // Populate options
+        REPO_CONFIGS.forEach(config => {
+            const option = document.createElement('option');
+            option.value = config.id;
+            option.textContent = config.name;
+            selector.appendChild(option);
+        });
+        // Handle selection change
+        selector.addEventListener('change', () => {
+            const selectedConfig = REPO_CONFIGS.find(c => c.id === selector.value);
+            if (selectedConfig) {
+                this.logger.log(`Switched to ${selectedConfig.name}`, 'info');
+                this.currentRepo = selectedConfig;
+                this.hybridAPI = new HybridAPI(selectedConfig, this.logger);
+            }
+        });
     }
     // Tab Management
     setupTabs() {
@@ -135,44 +454,6 @@ class Dashboard {
             });
         });
     }
-    // Settings Management
-    setupSettings() {
-        const tokenInput = document.getElementById('github-token');
-        const saveBtn = document.getElementById('save-token-btn');
-        const clearBtn = document.getElementById('clear-token-btn');
-        const statusDiv = document.getElementById('token-status');
-        // Load existing token (masked)
-        if (this.githubAPI.hasToken()) {
-            tokenInput.placeholder = '••••••••••••••••••••';
-        }
-        saveBtn === null || saveBtn === void 0 ? void 0 : saveBtn.addEventListener('click', () => {
-            const token = tokenInput.value.trim();
-            if (!token) {
-                this.showTokenStatus('Please enter a token', 'error');
-                return;
-            }
-            this.githubAPI.setToken(token);
-            tokenInput.value = '';
-            tokenInput.placeholder = '••••••••••••••••••••';
-            this.showTokenStatus('Token saved successfully! You now have higher rate limits.', 'success');
-        });
-        clearBtn === null || clearBtn === void 0 ? void 0 : clearBtn.addEventListener('click', () => {
-            this.githubAPI.clearToken();
-            tokenInput.value = '';
-            tokenInput.placeholder = 'ghp_xxxxxxxxxxxx';
-            this.showTokenStatus('Token cleared', 'success');
-        });
-    }
-    showTokenStatus(message, type) {
-        const statusDiv = document.getElementById('token-status');
-        if (!statusDiv)
-            return;
-        statusDiv.textContent = message;
-        statusDiv.className = `token-status ${type}`;
-        setTimeout(() => {
-            statusDiv.className = 'token-status';
-        }, 5000);
-    }
     // History Controls
     setupHistoryControls() {
         const sinceInput = document.getElementById('since-date');
@@ -183,8 +464,8 @@ class Dashboard {
         const today = new Date();
         const thirtyDaysAgo = new Date(today);
         thirtyDaysAgo.setDate(today.getDate() - 30);
-        untilInput.value = today.toISOString().split('T')[0];
-        sinceInput.value = thirtyDaysAgo.toISOString().split('T')[0];
+        untilInput.value = this.toLocalDateString(today);
+        sinceInput.value = this.toLocalDateString(thirtyDaysAgo);
         // Quick range buttons
         document.querySelectorAll('.btn-quick').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -192,8 +473,8 @@ class Dashboard {
                 const end = new Date();
                 const start = new Date();
                 start.setDate(end.getDate() - days);
-                sinceInput.value = start.toISOString().split('T')[0];
-                untilInput.value = end.toISOString().split('T')[0];
+                sinceInput.value = this.toLocalDateString(start);
+                untilInput.value = this.toLocalDateString(end);
             });
         });
         // Fetch button
@@ -209,18 +490,45 @@ class Dashboard {
         });
     }
     async fetchHistory(since, until) {
+        var _a;
         const statusDiv = document.getElementById('history-status');
         const historyList = document.getElementById('history-list');
         const noHistory = document.getElementById('no-history');
         if (!statusDiv || !historyList || !noHistory)
             return;
-        // Show loading
-        statusDiv.textContent = 'Fetching commit history from GitHub...';
+        // Cancel any in-flight request
+        if (this.currentFetchAbort) {
+            this.currentFetchAbort.abort();
+            this.logger.log('⚠ Previous fetch cancelled', 'warning');
+        }
+        // Create new abort controller for this fetch
+        this.currentFetchAbort = new AbortController();
+        const signal = this.currentFetchAbort.signal;
+        // Clear logs and show loading
+        this.logger.clear();
+        this.logger.log(`Starting fetch for ${this.currentRepo.name}`, 'info');
+        statusDiv.textContent = 'Checking GitHub mirror status...';
         statusDiv.className = 'history-status loading';
         historyList.innerHTML = '';
         noHistory.style.display = 'none';
         try {
-            const commits = await this.githubAPI.fetchAllCommits(since, until);
+            // Check if cancelled before starting
+            if (signal.aborted) {
+                this.logger.log('Fetch cancelled before starting', 'warning');
+                return;
+            }
+            const { commits, source } = await this.hybridAPI.fetchAllCommits(since, until, signal, (current, total, apiSource) => {
+                // Check if cancelled during progress
+                if (signal.aborted)
+                    return;
+                const sourceName = apiSource === 'github' ? 'GitHub' : 'Gitiles';
+                statusDiv.textContent = `Fetching from ${sourceName}... (${current}/${total})`;
+            });
+            // Check if cancelled after fetch
+            if (signal.aborted) {
+                this.logger.log('Fetch cancelled after completion', 'warning');
+                return;
+            }
             if (commits.size === 0) {
                 statusDiv.textContent = 'No commits found in the specified date range.';
                 statusDiv.className = 'history-status error';
@@ -230,15 +538,37 @@ class Dashboard {
             // Calculate total
             let totalCommits = 0;
             commits.forEach(list => totalCommits += list.length);
-            statusDiv.textContent = `Found ${totalCommits} commits across ${commits.size} files`;
+            const sourceName = source === 'github' ? 'GitHub (faster)' : 'Gitiles (slower but up-to-date)';
+            statusDiv.textContent = `Found ${totalCommits} commits across ${commits.size} files (via ${sourceName})`;
             statusDiv.className = 'history-status success';
             // Render commits grouped by file
             this.renderHistory(commits);
         }
         catch (error) {
+            // Don't show error if it was just an abort
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                this.logger.log('Fetch was cancelled', 'warning');
+                statusDiv.textContent = 'Fetch cancelled';
+                statusDiv.className = 'history-status warning';
+                return;
+            }
+            // Check if signal was aborted (might not throw AbortError in all cases)
+            if (signal.aborted) {
+                this.logger.log('Fetch was cancelled', 'warning');
+                statusDiv.textContent = 'Fetch cancelled';
+                statusDiv.className = 'history-status warning';
+                return;
+            }
+            this.logger.log(`Error: ${error.message}`, 'error');
             statusDiv.textContent = `Error: ${error.message}`;
             statusDiv.className = 'history-status error';
             noHistory.style.display = 'block';
+        }
+        finally {
+            // Clear abort controller if this was the current one
+            if (((_a = this.currentFetchAbort) === null || _a === void 0 ? void 0 : _a.signal) === signal) {
+                this.currentFetchAbort = null;
+            }
         }
     }
     renderHistory(commitsByFile) {
@@ -278,7 +608,7 @@ class Dashboard {
                 link.className = 'commit-link';
                 link.href = commit.url;
                 link.target = '_blank';
-                link.textContent = 'View on GitHub →';
+                link.textContent = 'View on Gitiles →';
                 commitDiv.appendChild(header);
                 commitDiv.appendChild(message);
                 commitDiv.appendChild(author);
@@ -287,140 +617,6 @@ class Dashboard {
             }
             historyList.appendChild(fileGroup);
         }
-    }
-    // Tracked Changes (existing functionality)
-    async loadChanges() {
-        try {
-            const response = await fetch('../data/changes.json');
-            if (response.ok) {
-                this.changes = await response.json();
-                this.changes.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-            }
-        }
-        catch (error) {
-            console.warn('No changes file found or error loading:', error);
-            this.changes = [];
-        }
-    }
-    updateStats() {
-        const totalChanges = this.changes.length;
-        const chromiumChanges = this.changes.filter(c => c.repo === 'chromium').length;
-        const depotToolsChanges = this.changes.filter(c => c.repo === 'depot_tools').length;
-        let lastCheck = 'Never';
-        if (this.changes.length > 0) {
-            const latest = new Date(this.changes[0].timestamp);
-            lastCheck = this.formatDate(latest);
-        }
-        document.getElementById('total-changes').textContent = totalChanges.toString();
-        document.getElementById('chromium-changes').textContent = chromiumChanges.toString();
-        document.getElementById('depot-tools-changes').textContent = depotToolsChanges.toString();
-        document.getElementById('last-check').textContent = lastCheck;
-    }
-    renderChanges() {
-        const changesList = document.getElementById('changes-list');
-        const noChanges = document.getElementById('no-changes');
-        const filteredChanges = this.filterChanges();
-        if (filteredChanges.length === 0) {
-            changesList.style.display = 'none';
-            noChanges.style.display = 'block';
-            return;
-        }
-        changesList.style.display = 'flex';
-        noChanges.style.display = 'none';
-        changesList.innerHTML = filteredChanges.map(change => this.renderChangeCard(change)).join('');
-    }
-    filterChanges() {
-        if (this.currentFilter === 'all') {
-            return this.changes;
-        }
-        return this.changes.filter(change => {
-            if (this.currentFilter === 'chromium' || this.currentFilter === 'depot_tools') {
-                return change.repo === this.currentFilter;
-            }
-            return change.type === this.currentFilter;
-        });
-    }
-    renderChangeCard(change) {
-        const timestamp = this.formatTimestamp(change.timestamp);
-        const diffButton = change.diff_html
-            ? `<button class="btn btn-primary view-diff" data-file="${change.file}" data-timestamp="${change.timestamp}">View Diff</button>`
-            : '';
-        return `
-            <div class="change-card" data-repo="${change.repo}" data-type="${change.type}">
-                <div class="change-header">
-                    <div class="change-title">
-                        <span class="change-type ${change.type}">${change.type}</span>
-                        <span class="repo-badge">${change.repo}</span>
-                    </div>
-                    <div class="change-meta">
-                        <span class="change-timestamp">${timestamp}</span>
-                    </div>
-                </div>
-                <div class="change-file">${change.file}</div>
-                <div class="change-summary">${change.summary}</div>
-                <div class="change-actions">
-                    ${diffButton}
-                    ${change.url ? `<a href="${change.url}" target="_blank" class="btn">View on GitHub</a>` : ''}
-                </div>
-            </div>
-        `;
-    }
-    setupChangeListeners() {
-        // Filter buttons
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const target = e.target;
-                const filter = target.dataset.filter || 'all';
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                target.classList.add('active');
-                this.currentFilter = filter;
-                this.renderChanges();
-            });
-        });
-        // Diff modal
-        const modal = document.getElementById('diff-modal');
-        const closeBtn = document.querySelector('.close');
-        closeBtn.addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-        window.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-        // View diff buttons
-        document.getElementById('changes-list').addEventListener('click', (e) => {
-            const target = e.target;
-            if (target.classList.contains('view-diff')) {
-                const file = target.dataset.file;
-                const timestamp = target.dataset.timestamp;
-                this.showDiff(file, timestamp);
-            }
-        });
-    }
-    showDiff(file, timestamp) {
-        const change = this.changes.find(c => c.file === file && c.timestamp === timestamp);
-        if (!change || !change.diff_html) {
-            return;
-        }
-        const modal = document.getElementById('diff-modal');
-        const diffViewer = document.getElementById('diff-viewer');
-        diffViewer.innerHTML = `
-            <h2>${file}</h2>
-            <p style="color: #8b949e; margin-bottom: 20px;">${change.summary} - ${this.formatTimestamp(change.timestamp)}</p>
-            ${change.diff_html}
-        `;
-        modal.style.display = 'block';
-    }
-    formatTimestamp(timestamp) {
-        const date = new Date(timestamp);
-        return date.toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
     }
     formatDate(date) {
         const now = new Date();
@@ -444,6 +640,12 @@ class Dashboard {
                 day: 'numeric'
             });
         }
+    }
+    toLocalDateString(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
 }
 // Initialize dashboard when DOM is ready
