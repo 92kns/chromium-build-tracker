@@ -30,6 +30,10 @@ jobs:
           # Copy updated files from main
           git checkout main -- dashboard/index.html dashboard/app.js dashboard/styles.css
 
+          # Inject deploy timestamp into HTML
+          DEPLOY_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+          sed -i "s/DEPLOY_TIME_PLACEHOLDER/$DEPLOY_TIME/g" dashboard/index.html
+
           # Move dashboard files to root
           mv dashboard/* . 2>/dev/null || true
           rm -rf dashboard

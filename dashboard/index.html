@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="deploy-time" content="DEPLOY_TIME_PLACEHOLDER">
     <title>Chromium Build Tracker</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -11,6 +12,10 @@
         <header>
             <h1>🔧 Chromium Build Tracker</h1>
             <p class="subtitle">Commit history for Chromium, V8, and depot_tools</p>
+            <div class="header-meta">
+                <a href="https://github.com/92kns/chromium-build-tracker/issues" target="_blank" class="issue-link">Report Issue</a>
+                <span class="deploy-time" id="deploy-time">Last deployed: <span id="deploy-timestamp">Unknown</span></span>
+            </div>
         </header>
 
         <!-- Commit History -->

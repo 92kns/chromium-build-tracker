@@ -416,6 +416,21 @@ class Dashboard {
     async init() {
         this.setupRepoSelector();
         this.setupHistoryControls();
+        this.loadDeployTime();
+    }
+    loadDeployTime() {
+        // Check if deploy time was injected by build process
+        const metaTag = document.querySelector('meta[name="deploy-time"]');
+        const timestampEl = document.getElementById('deploy-timestamp');
+        if (metaTag && timestampEl) {
+            const deployTime = metaTag.content;
+            if (deployTime && deployTime !== 'DEPLOY_TIME_PLACEHOLDER') {
+                timestampEl.textContent = deployTime + ' UTC';
+            }
+            else {
+                timestampEl.textContent = 'Development';
+            }
+        }
     }
     setupRepoSelector() {
         const selector = document.getElementById('repo-selector');
