@@ -34,6 +34,22 @@ interface GitHubCommit {
     html_url: string;
 }
 
+interface GitilesCommit {
+    commit: string;
+    author: {
+        name: string;
+        time: string;
+    };
+    message: string;
+}
+
+interface GitilesResponse {
+    log: GitilesCommit[];
+    next?: string;
+}
+
+type APISource = 'github' | 'gitiles';
+
 const CHROMIUM_FILES = [
     // Build documentation
     'docs/linux/build_instructions.md',
@@ -58,52 +74,19 @@ const CHROMIUM_FILES = [
 class GitHubAPI {
     private baseUrl = 'https://api.github.com';
     private repo = 'chromium/chromium';
-    private token: string | null = null;
 
-    constructor() {
-        // Load token from localStorage if available
-        this.token = localStorage.getItem('github_token');
-    }
-
-    setToken(token: string) {
-        this.token = token;
-        localStorage.setItem('github_token', token);
-    }
-
-    clearToken() {
-        this.token = null;
-        localStorage.removeItem('github_token');
-    }
-
-    hasToken(): boolean {
-        return this.token !== null && this.token.length > 0;
-    }
-
-    private async fetch(url: string): Promise<Response> {
-        const headers: HeadersInit = {
-            'Accept': 'application/vnd.github.v3+json'
-        };
-
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
-        }
-
-        const response = await fetch(url, { headers });
-
-        if (response.status === 403) {
-            const resetTime = response.headers.get('X-RateLimit-Reset');
-            if (resetTime) {
-                const resetDate = new Date(parseInt(resetTime) * 1000);
-                throw new Error(`Rate limit exceeded. Resets at ${resetDate.toLocaleTimeString()}. Consider adding a GitHub token in Settings.`);
+    private async fetchJson(url: string): Promise<any> {
+        const response = await fetch(url, {
+            headers: {
+                'Accept': 'application/vnd.github.v3+json'
             }
-            throw new Error('Rate limit exceeded. Consider adding a GitHub token in Settings.');
-        }
+        });
 
         if (!response.ok) {
             throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
         }
 
-        return response;
+        return response.json();
     }
 
     async fetchCommits(filePath: string, since?: string, until?: string): Promise<Commit[]> {
@@ -117,36 +100,196 @@ class GitHubAPI {
 
         const url = `${this.baseUrl}/repos/${this.repo}/commits?${params}`;
 
-        try {
-            const response = await this.fetch(url);
-            const data: GitHubCommit[] = await response.json();
+        const data: GitHubCommit[] = await this.fetchJson(url);
 
-            return data.map(commit => ({
-                sha: commit.sha.substring(0, 7),
-                message: commit.commit.message.split('\n')[0],
-                author: commit.commit.author.name,
-                date: commit.commit.author.date,
-                url: commit.html_url
+        return data.map(commit => ({
+            sha: commit.sha.substring(0, 7),
+            message: commit.commit.message.split('\n')[0],
+            author: commit.commit.author.name,
+            date: commit.commit.author.date,
+            url: commit.html_url
+        }));
+    }
+
+    async checkIfStale(): Promise<boolean> {
+        try {
+            // Fetch recent commits from main branch
+            const url = `${this.baseUrl}/repos/${this.repo}/commits?per_page=1`;
+            const data: GitHubCommit[] = await this.fetchJson(url);
+
+            if (data.length === 0) return true;
+
+            const lastCommitDate = new Date(data[0].commit.author.date);
+            const now = new Date();
+            const daysSinceLastCommit = (now.getTime() - lastCommitDate.getTime()) / (1000 * 60 * 60 * 24);
+
+            // Consider stale if no commits in the last 3 days
+            return daysSinceLastCommit > 3;
+        } catch (error) {
+            console.error('Error checking GitHub staleness:', error);
+            return true; // Assume stale on error
+        }
+    }
+}
+
+class GitilesAPI {
+    private baseUrl = '/api/gitiles';
+
+    private async fetchJson(url: string): Promise<any> {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`Gitiles API error: ${response.status} ${response.statusText}`);
+        }
+
+        const text = await response.text();
+
+        // Remove XSSI protection prefix
+        const jsonText = text.startsWith(')]}\'\n') ? text.substring(5) : text;
+
+        return JSON.parse(jsonText);
+    }
+
+    async fetchCommits(filePath: string, since?: string, until?: string): Promise<Commit[]> {
+        const url = `${this.baseUrl}/+log/main/${filePath}?format=json&n=100`;
+
+        try {
+            const data: GitilesResponse = await this.fetchJson(url);
+
+            let commits = data.log.map(commit => ({
+                sha: commit.commit.substring(0, 7),
+                message: commit.message.split('\n')[0],
+                author: commit.author.name,
+                date: this.parseGitilesDate(commit.author.time),
+                url: `https://chromium.googlesource.com/chromium/src/+/${commit.commit}`
             }));
+
+            // Filter by date range if specified
+            if (since || until) {
+                const sinceDate = since ? new Date(since) : null;
+                const untilDate = until ? new Date(until) : null;
+
+                commits = commits.filter(commit => {
+                    const commitDate = new Date(commit.date);
+                    if (sinceDate && commitDate < sinceDate) return false;
+                    if (untilDate && commitDate > untilDate) return false;
+                    return true;
+                });
+            }
+
+            return commits;
         } catch (error) {
             console.error(`Error fetching commits for ${filePath}:`, error);
             throw error;
         }
     }
 
-    async fetchAllCommits(since?: string, until?: string): Promise<Map<string, Commit[]>> {
+    private parseGitilesDate(dateStr: string): string {
+        // Gitiles returns dates like "Thu Dec 11 07:08:43 2025"
+        // Convert to ISO format
+        const date = new Date(dateStr);
+        return date.toISOString();
+    }
+
+    async fetchAllCommits(since?: string, until?: string, onProgress?: (current: number, total: number) => void): Promise<Map<string, Commit[]>> {
         const results = new Map<string, Commit[]>();
 
-        for (const filePath of CHROMIUM_FILES) {
-            try {
-                const commits = await this.fetchCommits(filePath, since, until);
-                if (commits.length > 0) {
-                    results.set(filePath, commits);
-                }
-            } catch (error) {
-                console.error(`Failed to fetch commits for ${filePath}:`, error);
-                // Continue with other files
+        // Fetch in parallel with concurrency limit
+        const concurrency = 3;
+        const files = [...CHROMIUM_FILES];
+        let completed = 0;
+
+        for (let i = 0; i < files.length; i += concurrency) {
+            const batch = files.slice(i, i + concurrency);
+            const promises = batch.map(filePath =>
+                this.fetchCommits(filePath, since, until)
+                    .then(commits => {
+                        if (commits.length > 0) {
+                            results.set(filePath, commits);
+                        }
+                        completed++;
+                        if (onProgress) {
+                            onProgress(completed, files.length);
+                        }
+                    })
+                    .catch(error => {
+                        console.error(`Failed to fetch commits for ${filePath}:`, error);
+                        completed++;
+                        if (onProgress) {
+                            onProgress(completed, files.length);
+                        }
+                    })
+            );
+
+            await Promise.all(promises);
+        }
+
+        return results;
+    }
+}
+
+class HybridAPI {
+    private githubAPI: GitHubAPI;
+    private gitilesAPI: GitilesAPI;
+    private preferredSource: APISource = 'github';
+
+    constructor() {
+        this.githubAPI = new GitHubAPI();
+        this.gitilesAPI = new GitilesAPI();
+    }
+
+    async fetchAllCommits(since?: string, until?: string, onProgress?: (current: number, total: number, source: APISource) => void): Promise<{ commits: Map<string, Commit[]>, source: APISource }> {
+        // Try GitHub first
+        try {
+            const isStale = await this.githubAPI.checkIfStale();
+
+            if (!isStale) {
+                console.log('Using GitHub API (mirror is up-to-date)');
+                const commits = await this.fetchFromGitHub(since, until, onProgress);
+                return { commits, source: 'github' };
+            } else {
+                console.log('GitHub mirror is stale, falling back to Gitiles');
             }
+        } catch (error) {
+            console.error('GitHub API failed, falling back to Gitiles:', error);
+        }
+
+        // Fallback to Gitiles
+        const commits = await this.gitilesAPI.fetchAllCommits(since, until, (current, total) => {
+            if (onProgress) onProgress(current, total, 'gitiles');
+        });
+        return { commits, source: 'gitiles' };
+    }
+
+    private async fetchFromGitHub(since?: string, until?: string, onProgress?: (current: number, total: number, source: APISource) => void): Promise<Map<string, Commit[]>> {
+        const results = new Map<string, Commit[]>();
+        const concurrency = 3;
+        const files = [...CHROMIUM_FILES];
+        let completed = 0;
+
+        for (let i = 0; i < files.length; i += concurrency) {
+            const batch = files.slice(i, i + concurrency);
+            const promises = batch.map(filePath =>
+                this.githubAPI.fetchCommits(filePath, since, until)
+                    .then(commits => {
+                        if (commits.length > 0) {
+                            results.set(filePath, commits);
+                        }
+                        completed++;
+                        if (onProgress) {
+                            onProgress(completed, files.length, 'github');
+                        }
+                    })
+                    .catch(error => {
+                        console.error(`Failed to fetch commits for ${filePath}:`, error);
+                        completed++;
+                        if (onProgress) {
+                            onProgress(completed, files.length, 'github');
+                        }
+                    })
+            );
+
+            await Promise.all(promises);
         }
 
         return results;
@@ -156,16 +299,15 @@ class GitHubAPI {
 class Dashboard {
     private changes: Change[] = [];
     private currentFilter: string = 'all';
-    private githubAPI: GitHubAPI;
+    private hybridAPI: HybridAPI;
 
     constructor() {
-        this.githubAPI = new GitHubAPI();
+        this.hybridAPI = new HybridAPI();
         this.init();
     }
 
     async init() {
         this.setupTabs();
-        this.setupSettings();
         this.setupHistoryControls();
 
         // Load tracked changes
@@ -194,51 +336,6 @@ class Dashboard {
         });
     }
 
-    // Settings Management
-    setupSettings() {
-        const tokenInput = document.getElementById('github-token') as HTMLInputElement;
-        const saveBtn = document.getElementById('save-token-btn');
-        const clearBtn = document.getElementById('clear-token-btn');
-        const statusDiv = document.getElementById('token-status');
-
-        // Load existing token (masked)
-        if (this.githubAPI.hasToken()) {
-            tokenInput.placeholder = '••••••••••••••••••••';
-        }
-
-        saveBtn?.addEventListener('click', () => {
-            const token = tokenInput.value.trim();
-
-            if (!token) {
-                this.showTokenStatus('Please enter a token', 'error');
-                return;
-            }
-
-            this.githubAPI.setToken(token);
-            tokenInput.value = '';
-            tokenInput.placeholder = '••••••••••••••••••••';
-            this.showTokenStatus('Token saved successfully! You now have higher rate limits.', 'success');
-        });
-
-        clearBtn?.addEventListener('click', () => {
-            this.githubAPI.clearToken();
-            tokenInput.value = '';
-            tokenInput.placeholder = 'ghp_xxxxxxxxxxxx';
-            this.showTokenStatus('Token cleared', 'success');
-        });
-    }
-
-    showTokenStatus(message: string, type: 'success' | 'error') {
-        const statusDiv = document.getElementById('token-status');
-        if (!statusDiv) return;
-
-        statusDiv.textContent = message;
-        statusDiv.className = `token-status ${type}`;
-
-        setTimeout(() => {
-            statusDiv.className = 'token-status';
-        }, 5000);
-    }
 
     // History Controls
     setupHistoryControls() {
@@ -252,8 +349,8 @@ class Dashboard {
         const thirtyDaysAgo = new Date(today);
         thirtyDaysAgo.setDate(today.getDate() - 30);
 
-        untilInput.value = today.toISOString().split('T')[0];
-        sinceInput.value = thirtyDaysAgo.toISOString().split('T')[0];
+        untilInput.value = this.toLocalDateString(today);
+        sinceInput.value = this.toLocalDateString(thirtyDaysAgo);
 
         // Quick range buttons
         document.querySelectorAll('.btn-quick').forEach(btn => {
@@ -263,8 +360,8 @@ class Dashboard {
                 const start = new Date();
                 start.setDate(end.getDate() - days);
 
-                sinceInput.value = start.toISOString().split('T')[0];
-                untilInput.value = end.toISOString().split('T')[0];
+                sinceInput.value = this.toLocalDateString(start);
+                untilInput.value = this.toLocalDateString(end);
             });
         });
 
@@ -291,13 +388,16 @@ class Dashboard {
         if (!statusDiv || !historyList || !noHistory) return;
 
         // Show loading
-        statusDiv.textContent = 'Fetching commit history from GitHub...';
+        statusDiv.textContent = 'Checking GitHub mirror status...';
         statusDiv.className = 'history-status loading';
         historyList.innerHTML = '';
         noHistory.style.display = 'none';
 
         try {
-            const commits = await this.githubAPI.fetchAllCommits(since, until);
+            const { commits, source } = await this.hybridAPI.fetchAllCommits(since, until, (current, total, apiSource) => {
+                const sourceName = apiSource === 'github' ? 'GitHub' : 'Gitiles (chromium.googlesource.com)';
+                statusDiv.textContent = `Fetching from ${sourceName}... (${current}/${total})`;
+            });
 
             if (commits.size === 0) {
                 statusDiv.textContent = 'No commits found in the specified date range.';
@@ -310,7 +410,8 @@ class Dashboard {
             let totalCommits = 0;
             commits.forEach(list => totalCommits += list.length);
 
-            statusDiv.textContent = `Found ${totalCommits} commits across ${commits.size} files`;
+            const sourceName = source === 'github' ? 'GitHub (faster)' : 'Gitiles (slower but up-to-date)';
+            statusDiv.textContent = `Found ${totalCommits} commits across ${commits.size} files (via ${sourceName})`;
             statusDiv.className = 'history-status success';
 
             // Render commits grouped by file
@@ -372,7 +473,7 @@ class Dashboard {
                 link.className = 'commit-link';
                 link.href = commit.url;
                 link.target = '_blank';
-                link.textContent = 'View on GitHub →';
+                link.textContent = 'View on Gitiles →';
 
                 commitDiv.appendChild(header);
                 commitDiv.appendChild(message);
@@ -471,7 +572,7 @@ class Dashboard {
                 <div class="change-summary">${change.summary}</div>
                 <div class="change-actions">
                     ${diffButton}
-                    ${change.url ? `<a href="${change.url}" target="_blank" class="btn">View on GitHub</a>` : ''}
+                    ${change.url ? `<a href="${change.url}" target="_blank" class="btn">View Source</a>` : ''}
                 </div>
             </div>
         `;
@@ -567,6 +668,13 @@ class Dashboard {
                 day: 'numeric'
             });
         }
+    }
+
+    toLocalDateString(date: Date): string {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
 }
 

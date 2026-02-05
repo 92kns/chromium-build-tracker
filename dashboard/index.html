@@ -15,13 +15,12 @@
 
         <!-- Tab Navigation -->
         <div class="tabs">
-            <button class="tab-btn active" data-tab="tracked">Tracked Changes</button>
-            <button class="tab-btn" data-tab="history">Commit History</button>
-            <button class="tab-btn" data-tab="settings">Settings</button>
+            <button class="tab-btn" data-tab="tracked">Tracked Changes</button>
+            <button class="tab-btn active" data-tab="history">Commit History</button>
         </div>
 
         <!-- Tracked Changes Tab -->
-        <div id="tracked-tab" class="tab-content active">
+        <div id="tracked-tab" class="tab-content">
             <div id="stats" class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-number" id="total-changes">0</div>
@@ -60,7 +59,7 @@
         </div>
 
         <!-- Commit History Tab -->
-        <div id="history-tab" class="tab-content">
+        <div id="history-tab" class="tab-content active">
             <div class="history-controls">
                 <div class="date-picker-group">
                     <div class="date-input-group">
@@ -92,34 +91,6 @@
             </div>
         </div>
 
-        <!-- Settings Tab -->
-        <div id="settings-tab" class="tab-content">
-            <div class="settings-section">
-                <h2>GitHub API Token (Optional)</h2>
-                <p>Provide a GitHub personal access token to increase rate limits from 60 to 5000 requests/hour.</p>
-                <p>The token is stored only in your browser's localStorage and never sent anywhere except GitHub API.</p>
-
-                <div class="token-input-group">
-                    <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx" />
-                    <button id="save-token-btn" class="btn btn-primary">Save Token</button>
-                    <button id="clear-token-btn" class="btn">Clear Token</button>
-                </div>
-
-                <div id="token-status" class="token-status"></div>
-
-                <div class="info-box">
-                    <h3>How to create a token:</h3>
-                    <ol>
-                        <li>Go to <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings → Developer settings → Personal access tokens</a></li>
-                        <li>Click "Generate new token (classic)"</li>
-                        <li>Give it a name like "Chromium Build Tracker"</li>
-                        <li>No special permissions needed (leave all checkboxes unchecked)</li>
-                        <li>Click "Generate token" and copy it</li>
-                        <li>Paste it here</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
     </div>
 
     <div id="diff-modal" class="modal">

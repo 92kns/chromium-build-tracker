@@ -10,10 +10,59 @@ import webbrowser
 import subprocess
 from pathlib import Path
 from typing import Optional
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import urllib.request
+import urllib.parse
 
 from fetcher import fetch_all
 from detector import ChangeDetector
 from history import CommitHistoryFetcher
+
+
+class GitilesProxyHandler(SimpleHTTPRequestHandler):
+    """HTTP handler that proxies Gitiles API requests and adds CORS headers"""
+
+    def end_headers(self):
+        """Add CORS headers to all responses"""
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests"""
+        self.send_response(200)
+        self.end_headers()
+
+    def do_GET(self):
+        """Handle GET requests - proxy Gitiles API or serve static files"""
+        if self.path.startswith('/api/gitiles/'):
+            self.proxy_gitiles_request()
+        else:
+            super().do_GET()
+
+    def proxy_gitiles_request(self):
+        """Proxy request to chromium.googlesource.com"""
+        try:
+            # Extract the path after /api/gitiles/
+            gitiles_path = self.path[len('/api/gitiles/'):]
+            gitiles_url = f'https://chromium.googlesource.com/chromium/src/{gitiles_path}'
+
+            # Fetch from Gitiles
+            with urllib.request.urlopen(gitiles_url) as response:
+                data = response.read()
+
+                # Send response
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(data)
+
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(f'Error proxying request: {e}'.encode())
 
 
 def get_github_token() -> Optional[str]:
@@ -105,8 +154,8 @@ def serve_command(args):
             print("\n✗ npm not found. Please install Node.js")
             sys.exit(1)
 
-    # Start simple HTTP server
-    print("\n🚀 Starting local server...")
+    # Start HTTP server with Gitiles proxy
+    print("\n🚀 Starting local server with Gitiles proxy...")
     print(f"   Dashboard: http://localhost:8000")
     print("   Press Ctrl+C to stop\n")
 
@@ -116,7 +165,8 @@ def serve_command(args):
     # Start HTTP server in dashboard directory
     try:
         os.chdir(dashboard_dir)
-        subprocess.run([sys.executable, "-m", "http.server", "8000"])
+        server = HTTPServer(('localhost', 8000), GitilesProxyHandler)
+        server.serve_forever()
     except KeyboardInterrupt:
         print("\n\n✓ Server stopped")
 

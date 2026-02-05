@@ -37,6 +37,12 @@ Chromium sometimes breaks for obscure reasons. This tool helps you:
 
 ### 1. Install Python dependencies
 
+Using `uv` (recommended - much faster):
+```bash
+uv pip install -r scraper/requirements.txt
+```
+
+Or using pip:
 ```bash
 pip install -r scraper/requirements.txt
 ```
@@ -82,7 +88,7 @@ This will:
 - Start local HTTP server on port 8000
 - Open dashboard in your browser
 
-The dashboard has **3 tabs**:
+The dashboard has **2 tabs**:
 
 **1. Tracked Changes** - Snapshot-based tracking
 - Stats: Total changes, changes by repo, last check time
@@ -90,17 +96,13 @@ The dashboard has **3 tabs**:
 - Change cards with summaries and links
 - Diff viewer: Click "View Diff" to see exact changes
 
-**2. Commit History** 
+**2. Commit History**
 - **Interactive date range picker** - Query any time period
 - **Quick ranges** - Last 7/30/90 days with one click
-- **Live GitHub API fetching** - No backend needed!
+- **Live Gitiles API fetching** - Queries chromium.googlesource.com directly
 - **Grouped by file** - See commits organized by document
-- Works as pure static site (GitHub Pages compatible)
-
-**3. Settings**
-- Add GitHub personal access token
-- Increase rate limits from 60 to 5000 requests/hour
-- Token stored only in browser localStorage
+- Works as pure static site (no backend needed)
+- No authentication required
 
 ### Fetch and view in one command
 
@@ -201,7 +203,7 @@ python3 scraper/main.py history --output file.txt  # Save to file
 
 ```bash
 # 1. Initial setup (one time)
-pip install -r scraper/requirements.txt
+uv pip install -r scraper/requirements.txt
 cd dashboard && npm install && cd ..
 
 # 2. Create baseline
