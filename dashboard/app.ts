@@ -568,16 +568,17 @@ class Dashboard {
 
     loadDeployTime() {
         // Check if deploy time was injected by build process
-        const metaTag = document.querySelector('meta[name="deploy-time"]') as HTMLMetaElement;
         const timestampEl = document.getElementById('deploy-timestamp');
+        if (!timestampEl) return;
 
-        if (metaTag && timestampEl) {
-            const deployTime = metaTag.content;
-            if (deployTime && deployTime !== 'DEPLOY_TIME_PLACEHOLDER') {
-                timestampEl.textContent = deployTime + ' UTC';
-            } else {
-                timestampEl.textContent = 'Development';
-            }
+        const metaTag = document.querySelector('meta[name="deploy-time"]') as HTMLMetaElement;
+
+        if (metaTag && metaTag.content && metaTag.content !== 'DEPLOY_TIME_PLACEHOLDER') {
+            // Production: show actual deploy time
+            timestampEl.textContent = metaTag.content + ' UTC';
+        } else {
+            // Development: show "Development"
+            timestampEl.textContent = 'Development';
         }
     }
 
