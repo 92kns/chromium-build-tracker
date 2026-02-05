@@ -99,9 +99,9 @@ The dashboard has **2 tabs**:
 **2. Commit History**
 - **Interactive date range picker** - Query any time period
 - **Quick ranges** - Last 7/30/90 days with one click
-- **Live Gitiles API fetching** - Queries chromium.googlesource.com directly
+- **Hybrid API approach** - Automatically uses GitHub (fast) when fresh, falls back to Gitiles (slow but always current) when stale
+- **Smart source selection** - Checks GitHub mirror freshness and switches to Gitiles if outdated
 - **Grouped by file** - See commits organized by document
-- Works as pure static site (no backend needed)
 - No authentication required
 
 ### Fetch and view in one command
@@ -152,6 +152,11 @@ docs/windows_build_instructions.md
 3. **Diff generator** creates HTML diffs for modified files
 4. **Changes log** stores all detected changes in `data/changes.json`
 5. **Dashboard** reads the changes and displays them with filters and diffs
+6. **Hybrid API** - Commit history feature automatically chooses the best data source:
+   - Tries GitHub API first (much faster, ~2-3 seconds)
+   - Checks if GitHub mirror is fresh (commits within last 3 days)
+   - Falls back to Gitiles API if GitHub is stale or unavailable (~10-15 seconds)
+   - Dashboard shows which source was used: "via GitHub (faster)" or "via Gitiles (slower but up-to-date)"
 
 
 
@@ -219,6 +224,24 @@ python3 scraper/main.py history --since "2024-10-15" --until "2024-11-20"
 python3 scraper/main.py serve
 ```
 
+## Data Sources
+
+The dashboard uses a **hybrid approach** for fetching commit history:
+
+### GitHub API (Primary - Fast)
+- **Speed**: ~2-3 seconds for all files
+- **When used**: When GitHub mirror is fresh (commits within last 3 days)
+- **Limitation**: GitHub mirror occasionally goes stale for days/weeks
+- **No auth required**: Works without tokens (60 requests/hour limit is plenty)
+
+### Gitiles API (Fallback - Slow but Reliable)
+- **Speed**: ~10-15 seconds for all files
+- **When used**: When GitHub mirror is stale or unavailable
+- **Source**: chromium.googlesource.com (official Chromium repository)
+- **Reliability**: Always up-to-date (source of truth)
+
+The dashboard automatically detects which source to use and shows you which one was used in the status message.
+
 ## Future improvements
 
 - **depot_tools tracking** - Currently not implemented (no GitHub mirror, needs Gitiles API)
@@ -228,3 +251,4 @@ python3 scraper/main.py serve
 - **More detailed tracking** - Track specific sections within files
 - **CI integration** - Compare your CI environment with docs
 - **Diff viewing in history command** - Show actual file diffs for each commit
+- **GitHub token support** - Add optional token for higher rate limits (5000/hour vs 60/hour)
