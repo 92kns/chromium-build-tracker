@@ -13,10 +13,17 @@ from typing import Optional
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import urllib.request
 import urllib.parse
+import time
+from functools import lru_cache
 
 from fetcher import fetch_all
 from detector import ChangeDetector
 from history import CommitHistoryFetcher
+
+
+# Simple in-memory cache for Gitiles responses
+_gitiles_cache = {}
+_cache_ttl = 600  # 10 minutes in seconds
 
 
 class GitilesProxyHandler(SimpleHTTPRequestHandler):
@@ -42,20 +49,45 @@ class GitilesProxyHandler(SimpleHTTPRequestHandler):
             super().do_GET()
 
     def proxy_gitiles_request(self):
-        """Proxy request to Gitiles (chromium.googlesource.com or other hosts)"""
+        """Proxy request to Gitiles (chromium.googlesource.com or other hosts) with caching"""
         try:
             # Extract the path after /api/gitiles/
             # Format: /api/gitiles/{host}/{project}/+log/...
             gitiles_path = self.path[len('/api/gitiles/'):]
             gitiles_url = f'https://{gitiles_path}'
 
-            # Fetch from Gitiles
+            # Check cache
+            cache_key = gitiles_url
+            now = time.time()
+            if cache_key in _gitiles_cache:
+                cached_data, cached_time = _gitiles_cache[cache_key]
+                if now - cached_time < _cache_ttl:
+                    # Cache hit
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('X-Cache', 'HIT')
+                    self.end_headers()
+                    self.wfile.write(cached_data)
+                    return
+
+            # Cache miss - fetch from Gitiles
             with urllib.request.urlopen(gitiles_url) as response:
                 data = response.read()
+
+                # Store in cache
+                _gitiles_cache[cache_key] = (data, now)
+
+                # Clean old cache entries (simple LRU)
+                if len(_gitiles_cache) > 100:
+                    # Remove oldest 20 entries
+                    sorted_items = sorted(_gitiles_cache.items(), key=lambda x: x[1][1])
+                    for old_key, _ in sorted_items[:20]:
+                        del _gitiles_cache[old_key]
 
                 # Send response
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('X-Cache', 'MISS')
                 self.end_headers()
                 self.wfile.write(data)
 

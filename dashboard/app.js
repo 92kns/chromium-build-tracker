@@ -212,7 +212,7 @@ class GitilesAPI {
     async fetchAllCommits(since, until, onProgress) {
         const results = new Map();
         // Fetch in parallel with concurrency limit
-        const concurrency = 3;
+        const concurrency = 10; // High concurrency for faster fetching
         const files = [...CHROMIUM_FILES];
         let completed = 0;
         for (let i = 0; i < files.length; i += concurrency) {
@@ -241,12 +241,74 @@ class GitilesAPI {
 }
 class HybridAPI {
     constructor(config, logger) {
+        this.cacheExpiryMs = 10 * 60 * 1000; // 10 minutes
         this.config = config;
         this.logger = logger;
         this.githubAPI = new GitHubAPI(config);
         this.gitilesAPI = new GitilesAPI(config);
     }
+    getCacheKey(since, until) {
+        return `cache_${this.config.id}_${since || 'none'}_${until || 'none'}`;
+    }
+    getCached(since, until) {
+        try {
+            const key = this.getCacheKey(since, until);
+            const cached = localStorage.getItem(key);
+            if (!cached)
+                return null;
+            const entry = JSON.parse(cached);
+            const age = Date.now() - entry.timestamp;
+            if (age > this.cacheExpiryMs) {
+                localStorage.removeItem(key);
+                return null;
+            }
+            // Convert plain object back to Map
+            const commitsMap = new Map();
+            const commitsObj = entry.commits;
+            for (const key in commitsObj) {
+                if (commitsObj.hasOwnProperty(key)) {
+                    commitsMap.set(key, commitsObj[key]);
+                }
+            }
+            entry.commits = commitsMap;
+            return entry;
+        }
+        catch (e) {
+            return null;
+        }
+    }
+    setCache(commits, source, since, until) {
+        try {
+            const key = this.getCacheKey(since, until);
+            const entry = {
+                commits,
+                source,
+                timestamp: Date.now()
+            };
+            // Convert Map to plain object for JSON
+            const commitsObj = {};
+            commits.forEach((value, key) => {
+                commitsObj[key] = value;
+            });
+            const cacheData = {
+                commits: commitsObj,
+                source: entry.source,
+                timestamp: entry.timestamp
+            };
+            localStorage.setItem(key, JSON.stringify(cacheData));
+        }
+        catch (e) {
+            // Ignore cache write errors (quota exceeded, etc.)
+            console.warn('Failed to cache results:', e);
+        }
+    }
     async fetchAllCommits(since, until, signal, onProgress) {
+        // Check cache first
+        const cached = this.getCached(since, until);
+        if (cached) {
+            this.logger.log(`Using cached results for ${this.config.name} (less than 10 min old)`, 'success');
+            return { commits: cached.commits, source: cached.source };
+        }
         this.logger.log(`Fetching commits for ${this.config.name}`, 'info');
         // Check if cancelled
         if (signal === null || signal === void 0 ? void 0 : signal.aborted) {
@@ -265,6 +327,8 @@ class HybridAPI {
                     this.logger.log('GitHub mirror is fresh - using GitHub API (fast)', 'success');
                     const commits = await this.fetchFromGitHub(since, until, signal, onProgress);
                     this.logger.log(`Fetched ${commits.size} files with commits from GitHub`, 'success');
+                    // Cache the results
+                    this.setCache(commits, 'github', since, until);
                     return { commits, source: 'github' };
                 }
                 else {
@@ -297,11 +361,13 @@ class HybridAPI {
                 onProgress(current, total, 'gitiles');
         });
         this.logger.log(`Fetched ${commits.size} files with commits from Gitiles`, 'success');
+        // Cache the results
+        this.setCache(commits, 'gitiles', since, until);
         return { commits, source: 'gitiles' };
     }
     async fetchFromGitHub(since, until, signal, onProgress) {
         const results = new Map();
-        const concurrency = 3;
+        const concurrency = 10; // High concurrency for faster fetching
         const files = [...this.config.files];
         let completed = 0;
         console.log(`[${this.config.name}] Fetching ${files.length} files from GitHub...`);

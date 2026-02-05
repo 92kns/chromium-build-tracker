@@ -314,7 +314,7 @@ class GitilesAPI {
         const results = new Map<string, Commit[]>();
 
         // Fetch in parallel with concurrency limit
-        const concurrency = 3;
+        const concurrency = 10; // High concurrency for faster fetching
         const files = [...CHROMIUM_FILES];
         let completed = 0;
 
@@ -347,11 +347,18 @@ class GitilesAPI {
     }
 }
 
+interface CacheEntry {
+    commits: Map<string, Commit[]>;
+    source: APISource;
+    timestamp: number;
+}
+
 class HybridAPI {
     private githubAPI: GitHubAPI;
     private gitilesAPI: GitilesAPI;
     private config: RepoConfig;
     private logger: Logger;
+    private cacheExpiryMs = 10 * 60 * 1000; // 10 minutes
 
     constructor(config: RepoConfig, logger: Logger) {
         this.config = config;
@@ -360,7 +367,75 @@ class HybridAPI {
         this.gitilesAPI = new GitilesAPI(config);
     }
 
+    private getCacheKey(since?: string, until?: string): string {
+        return `cache_${this.config.id}_${since || 'none'}_${until || 'none'}`;
+    }
+
+    private getCached(since?: string, until?: string): CacheEntry | null {
+        try {
+            const key = this.getCacheKey(since, until);
+            const cached = localStorage.getItem(key);
+            if (!cached) return null;
+
+            const entry: CacheEntry = JSON.parse(cached);
+            const age = Date.now() - entry.timestamp;
+
+            if (age > this.cacheExpiryMs) {
+                localStorage.removeItem(key);
+                return null;
+            }
+
+            // Convert plain object back to Map
+            const commitsMap = new Map<string, Commit[]>();
+            const commitsObj = entry.commits as any;
+            for (const key in commitsObj) {
+                if (commitsObj.hasOwnProperty(key)) {
+                    commitsMap.set(key, commitsObj[key]);
+                }
+            }
+            entry.commits = commitsMap;
+            return entry;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private setCache(commits: Map<string, Commit[]>, source: APISource, since?: string, until?: string) {
+        try {
+            const key = this.getCacheKey(since, until);
+            const entry: CacheEntry = {
+                commits,
+                source,
+                timestamp: Date.now()
+            };
+
+            // Convert Map to plain object for JSON
+            const commitsObj: any = {};
+            commits.forEach((value, key) => {
+                commitsObj[key] = value;
+            });
+
+            const cacheData = {
+                commits: commitsObj,
+                source: entry.source,
+                timestamp: entry.timestamp
+            };
+
+            localStorage.setItem(key, JSON.stringify(cacheData));
+        } catch (e) {
+            // Ignore cache write errors (quota exceeded, etc.)
+            console.warn('Failed to cache results:', e);
+        }
+    }
+
     async fetchAllCommits(since?: string, until?: string, signal?: AbortSignal, onProgress?: (current: number, total: number, source: APISource) => void): Promise<{ commits: Map<string, Commit[]>, source: APISource }> {
+        // Check cache first
+        const cached = this.getCached(since, until);
+        if (cached) {
+            this.logger.log(`Using cached results for ${this.config.name} (less than 10 min old)`, 'success');
+            return { commits: cached.commits, source: cached.source };
+        }
+
         this.logger.log(`Fetching commits for ${this.config.name}`, 'info');
 
         // Check if cancelled
@@ -384,6 +459,10 @@ class HybridAPI {
                     this.logger.log('GitHub mirror is fresh - using GitHub API (fast)', 'success');
                     const commits = await this.fetchFromGitHub(since, until, signal, onProgress);
                     this.logger.log(`Fetched ${commits.size} files with commits from GitHub`, 'success');
+
+                    // Cache the results
+                    this.setCache(commits, 'github', since, until);
+
                     return { commits, source: 'github' };
                 } else {
                     this.logger.log('GitHub mirror is stale (>3 days old) - falling back to Gitiles', 'warning');
@@ -413,12 +492,16 @@ class HybridAPI {
             if (onProgress) onProgress(current, total, 'gitiles');
         });
         this.logger.log(`Fetched ${commits.size} files with commits from Gitiles`, 'success');
+
+        // Cache the results
+        this.setCache(commits, 'gitiles', since, until);
+
         return { commits, source: 'gitiles' };
     }
 
     private async fetchFromGitHub(since?: string, until?: string, signal?: AbortSignal, onProgress?: (current: number, total: number, source: APISource) => void): Promise<Map<string, Commit[]>> {
         const results = new Map<string, Commit[]>();
-        const concurrency = 3;
+        const concurrency = 10; // High concurrency for faster fetching
         const files = [...this.config.files];
         let completed = 0;
 
