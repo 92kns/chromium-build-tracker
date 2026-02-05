@@ -637,3 +637,81 @@ h1 {
         width: 100%;
     }
 }
+
+/* Repository Selector */
+.repo-selector-group {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.repo-selector-group label {
+    font-weight: 600;
+    color: #c9d1d9;
+}
+
+.repo-selector {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    min-width: 200px;
+}
+
+.repo-selector:hover {
+    border-color: #58a6ff;
+}
+
+.repo-selector:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+}
+
+/* Log Panel */
+.log-panel {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.log-panel:empty {
+    display: none;
+}
+
+.log-entry {
+    padding: 4px 0;
+    color: #8b949e;
+}
+
+.log-entry.info {
+    color: #58a6ff;
+}
+
+.log-entry.success {
+    color: #3fb950;
+}
+
+.log-entry.warning {
+    color: #d29922;
+}
+
+.log-entry.error {
+    color: #f85149;
+}
+
+.log-timestamp {
+    color: #6e7681;
+    margin-right: 8px;
+}

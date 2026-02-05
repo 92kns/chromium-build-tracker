@@ -1,28 +1,108 @@
 /**
  * Chromium Build Tracker Dashboard
  */
-const CHROMIUM_FILES = [
-    // Build documentation
-    'docs/linux/build_instructions.md',
-    'docs/mac_build_instructions.md',
-    'docs/windows_build_instructions.md',
-    'docs/android_build_instructions.md',
-    // Critical build configs (Tier 1)
-    'DEPS',
-    'build/config/android/config.gni',
-    'build/config/mac/mac_sdk.gni',
-    'build/config/win/visual_studio_version.gni',
-    // Toolchain setup scripts (Tier 2)
-    'build/install-build-deps.sh',
-    'build/install-build-deps.py',
-    'build/vs_toolchain.py',
-    'build/mac_toolchain.py',
-    '.vpython3'
-];
-class GitHubAPI {
+class Logger {
     constructor() {
+        this.logPanel = document.getElementById('log-panel');
+    }
+    log(message, level = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        const logMessage = `[${timestamp}] ${message}`;
+        // Console logging
+        const consoleMethod = level === 'error' ? console.error : level === 'warning' ? console.warn : console.log;
+        consoleMethod(logMessage);
+        // UI logging
+        if (this.logPanel) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${level}`;
+            entry.innerHTML = `<span class="log-timestamp">${timestamp}</span>${message}`;
+            this.logPanel.appendChild(entry);
+            // Auto-scroll to bottom
+            this.logPanel.scrollTop = this.logPanel.scrollHeight;
+            // Keep only last 50 entries
+            while (this.logPanel.children.length > 50) {
+                this.logPanel.removeChild(this.logPanel.firstChild);
+            }
+        }
+    }
+    clear() {
+        if (this.logPanel) {
+            this.logPanel.innerHTML = '';
+        }
+    }
+}
+const REPO_CONFIGS = [
+    {
+        id: 'chromium',
+        name: 'Chromium',
+        github: {
+            owner: 'chromium',
+            repo: 'chromium'
+        },
+        gitiles: {
+            host: 'chromium.googlesource.com',
+            project: 'chromium/src'
+        },
+        files: [
+            'docs/linux/build_instructions.md',
+            'docs/mac_build_instructions.md',
+            'docs/windows_build_instructions.md',
+            'docs/android_build_instructions.md',
+            'DEPS',
+            'build/config/android/config.gni',
+            'build/config/mac/mac_sdk.gni',
+            'build/config/win/visual_studio_version.gni',
+            'build/install-build-deps.sh',
+            'build/install-build-deps.py',
+            'build/vs_toolchain.py',
+            'build/mac_toolchain.py',
+            '.vpython3'
+        ]
+    },
+    {
+        id: 'v8',
+        name: 'V8 Engine',
+        github: {
+            owner: 'v8',
+            repo: 'v8'
+        },
+        gitiles: {
+            host: 'chromium.googlesource.com',
+            project: 'v8/v8'
+        },
+        files: [
+            'README.md',
+            'DEPS',
+            'BUILD.gn',
+            'infra/mb/mb_config.pyl',
+            'tools/dev/gm.py',
+            'tools/dev/v8gen.py'
+        ]
+    },
+    {
+        id: 'depot_tools',
+        name: 'depot_tools',
+        // No GitHub mirror exists, Gitiles only
+        gitiles: {
+            host: 'chromium.googlesource.com',
+            project: 'chromium/tools/depot_tools'
+        },
+        files: [
+            'README.md',
+            'gclient.py',
+            'gclient_utils.py',
+            'git_cl.py',
+            'autoninja.py',
+            'cipd_manifest.txt'
+        ]
+    }
+];
+// Legacy constant for backwards compatibility
+const CHROMIUM_FILES = REPO_CONFIGS[0].files;
+class GitHubAPI {
+    constructor(config) {
         this.baseUrl = 'https://api.github.com';
-        this.repo = 'chromium/chromium';
+        this.config = config;
     }
     async fetchJson(url) {
         const response = await fetch(url, {
@@ -44,7 +124,7 @@ class GitHubAPI {
             params.append('since', since);
         if (until)
             params.append('until', until);
-        const url = `${this.baseUrl}/repos/${this.repo}/commits?${params}`;
+        const url = `${this.baseUrl}/repos/${this.config.github.owner}/${this.config.github.repo}/commits?${params}`;
         const data = await this.fetchJson(url);
         return data.map(commit => ({
             sha: commit.sha.substring(0, 7),
@@ -57,25 +137,30 @@ class GitHubAPI {
     async checkIfStale() {
         try {
             // Fetch recent commits from main branch
-            const url = `${this.baseUrl}/repos/${this.repo}/commits?per_page=1`;
+            const url = `${this.baseUrl}/repos/${this.config.github.owner}/${this.config.github.repo}/commits?per_page=1`;
+            console.log(`[GitHub] Checking staleness for ${this.config.name}...`);
             const data = await this.fetchJson(url);
-            if (data.length === 0)
+            if (data.length === 0) {
+                console.log(`[GitHub] No commits found for ${this.config.name}, considering stale`);
                 return true;
+            }
             const lastCommitDate = new Date(data[0].commit.author.date);
             const now = new Date();
             const daysSinceLastCommit = (now.getTime() - lastCommitDate.getTime()) / (1000 * 60 * 60 * 24);
-            // Consider stale if no commits in the last 3 days
-            return daysSinceLastCommit > 3;
+            const isStale = daysSinceLastCommit > 3;
+            console.log(`[GitHub] ${this.config.name} last commit: ${daysSinceLastCommit.toFixed(1)} days ago - ${isStale ? 'STALE' : 'FRESH'}`);
+            return isStale;
         }
         catch (error) {
-            console.error('Error checking GitHub staleness:', error);
-            return true; // Assume stale on error
+            console.error(`[GitHub] Error checking staleness for ${this.config.name}:`, error);
+            return true;
         }
     }
 }
 class GitilesAPI {
-    constructor() {
+    constructor(config) {
         this.baseUrl = '/api/gitiles';
+        this.config = config;
     }
     async fetchJson(url) {
         const response = await fetch(url);
@@ -88,7 +173,7 @@ class GitilesAPI {
         return JSON.parse(jsonText);
     }
     async fetchCommits(filePath, since, until) {
-        const url = `${this.baseUrl}/+log/main/${filePath}?format=json&n=100`;
+        const url = `${this.baseUrl}/${this.config.gitiles.host}/${this.config.gitiles.project}/+log/main/${filePath}?format=json&n=100`;
         try {
             const data = await this.fetchJson(url);
             let commits = data.log.map(commit => ({
@@ -96,7 +181,7 @@ class GitilesAPI {
                 message: commit.message.split('\n')[0],
                 author: commit.author.name,
                 date: this.parseGitilesDate(commit.author.time),
-                url: `https://chromium.googlesource.com/chromium/src/+/${commit.commit}`
+                url: `https://${this.config.gitiles.host}/${this.config.gitiles.project}/+/${commit.commit}`
             }));
             // Filter by date range if specified
             if (since || until) {
@@ -155,39 +240,52 @@ class GitilesAPI {
     }
 }
 class HybridAPI {
-    constructor() {
-        this.preferredSource = 'github';
-        this.githubAPI = new GitHubAPI();
-        this.gitilesAPI = new GitilesAPI();
+    constructor(config, logger) {
+        this.config = config;
+        this.logger = logger;
+        this.githubAPI = new GitHubAPI(config);
+        this.gitilesAPI = new GitilesAPI(config);
     }
     async fetchAllCommits(since, until, onProgress) {
-        // Try GitHub first
-        try {
-            const isStale = await this.githubAPI.checkIfStale();
-            if (!isStale) {
-                console.log('Using GitHub API (mirror is up-to-date)');
-                const commits = await this.fetchFromGitHub(since, until, onProgress);
-                return { commits, source: 'github' };
+        this.logger.log(`Fetching commits for ${this.config.name}`, 'info');
+        // Try GitHub first (if available)
+        if (this.config.github) {
+            try {
+                this.logger.log('Checking GitHub mirror status...', 'info');
+                const isStale = await this.githubAPI.checkIfStale();
+                if (!isStale) {
+                    this.logger.log('GitHub mirror is fresh - using GitHub API (fast)', 'success');
+                    const commits = await this.fetchFromGitHub(since, until, onProgress);
+                    this.logger.log(`Fetched ${commits.size} files with commits from GitHub`, 'success');
+                    return { commits, source: 'github' };
+                }
+                else {
+                    this.logger.log('GitHub mirror is stale (>3 days old) - falling back to Gitiles', 'warning');
+                }
             }
-            else {
-                console.log('GitHub mirror is stale, falling back to Gitiles');
+            catch (error) {
+                this.logger.log(`GitHub API failed: ${error}`, 'error');
+                this.logger.log('Falling back to Gitiles API', 'warning');
             }
         }
-        catch (error) {
-            console.error('GitHub API failed, falling back to Gitiles:', error);
+        else {
+            this.logger.log('No GitHub mirror available - using Gitiles only', 'info');
         }
-        // Fallback to Gitiles
+        // Fallback to Gitiles (or primary if no GitHub)
+        this.logger.log('Using Gitiles API (slower but always current)', 'info');
         const commits = await this.gitilesAPI.fetchAllCommits(since, until, (current, total) => {
             if (onProgress)
                 onProgress(current, total, 'gitiles');
         });
+        this.logger.log(`Fetched ${commits.size} files with commits from Gitiles`, 'success');
         return { commits, source: 'gitiles' };
     }
     async fetchFromGitHub(since, until, onProgress) {
         const results = new Map();
         const concurrency = 3;
-        const files = [...CHROMIUM_FILES];
+        const files = [...this.config.files];
         let completed = 0;
+        console.log(`[${this.config.name}] Fetching ${files.length} files from GitHub...`);
         for (let i = 0; i < files.length; i += concurrency) {
             const batch = files.slice(i, i + concurrency);
             const promises = batch.map(filePath => this.githubAPI.fetchCommits(filePath, since, until)
@@ -201,7 +299,7 @@ class HybridAPI {
                 }
             })
                 .catch(error => {
-                console.error(`Failed to fetch commits for ${filePath}:`, error);
+                console.error(`[${this.config.name}] Failed to fetch ${filePath}:`, error);
                 completed++;
                 if (onProgress) {
                     onProgress(completed, files.length, 'github');
@@ -216,17 +314,41 @@ class Dashboard {
     constructor() {
         this.changes = [];
         this.currentFilter = 'all';
-        this.hybridAPI = new HybridAPI();
+        this.logger = new Logger();
+        this.currentRepo = REPO_CONFIGS[0]; // Default to Chromium
+        this.hybridAPI = new HybridAPI(this.currentRepo, this.logger);
         this.init();
     }
     async init() {
         this.setupTabs();
+        this.setupRepoSelector();
         this.setupHistoryControls();
         // Load tracked changes
         await this.loadChanges();
         this.updateStats();
         this.renderChanges();
         this.setupChangeListeners();
+    }
+    setupRepoSelector() {
+        const selector = document.getElementById('repo-selector');
+        if (!selector)
+            return;
+        // Populate options
+        REPO_CONFIGS.forEach(config => {
+            const option = document.createElement('option');
+            option.value = config.id;
+            option.textContent = config.name;
+            selector.appendChild(option);
+        });
+        // Handle selection change
+        selector.addEventListener('change', () => {
+            const selectedConfig = REPO_CONFIGS.find(c => c.id === selector.value);
+            if (selectedConfig) {
+                this.logger.log(`Switched to ${selectedConfig.name}`, 'info');
+                this.currentRepo = selectedConfig;
+                this.hybridAPI = new HybridAPI(selectedConfig, this.logger);
+            }
+        });
     }
     // Tab Management
     setupTabs() {
@@ -285,14 +407,15 @@ class Dashboard {
         const noHistory = document.getElementById('no-history');
         if (!statusDiv || !historyList || !noHistory)
             return;
-        // Show loading
+        // Clear logs and show loading
+        this.logger.clear();
         statusDiv.textContent = 'Checking GitHub mirror status...';
         statusDiv.className = 'history-status loading';
         historyList.innerHTML = '';
         noHistory.style.display = 'none';
         try {
             const { commits, source } = await this.hybridAPI.fetchAllCommits(since, until, (current, total, apiSource) => {
-                const sourceName = apiSource === 'github' ? 'GitHub' : 'Gitiles (chromium.googlesource.com)';
+                const sourceName = apiSource === 'github' ? 'GitHub' : 'Gitiles';
                 statusDiv.textContent = `Fetching from ${sourceName}... (${current}/${total})`;
             });
             if (commits.size === 0) {

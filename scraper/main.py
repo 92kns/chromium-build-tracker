@@ -42,11 +42,12 @@ class GitilesProxyHandler(SimpleHTTPRequestHandler):
             super().do_GET()
 
     def proxy_gitiles_request(self):
-        """Proxy request to chromium.googlesource.com"""
+        """Proxy request to Gitiles (chromium.googlesource.com or other hosts)"""
         try:
             # Extract the path after /api/gitiles/
+            # Format: /api/gitiles/{host}/{project}/+log/...
             gitiles_path = self.path[len('/api/gitiles/'):]
-            gitiles_url = f'https://chromium.googlesource.com/chromium/src/{gitiles_path}'
+            gitiles_url = f'https://{gitiles_path}'
 
             # Fetch from Gitiles
             with urllib.request.urlopen(gitiles_url) as response:

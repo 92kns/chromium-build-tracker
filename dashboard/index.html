@@ -61,6 +61,12 @@
         <!-- Commit History Tab -->
         <div id="history-tab" class="tab-content active">
             <div class="history-controls">
+                <div class="repo-selector-group">
+                    <label for="repo-selector">Repository:</label>
+                    <select id="repo-selector" class="repo-selector">
+                        <!-- Options populated by JavaScript -->
+                    </select>
+                </div>
                 <div class="date-picker-group">
                     <div class="date-input-group">
                         <label for="since-date">From:</label>
@@ -81,6 +87,10 @@
             </div>
 
             <div id="history-status" class="history-status"></div>
+
+            <div id="log-panel" class="log-panel">
+                <!-- Logs will be populated here -->
+            </div>
 
             <div id="history-list" class="history-list">
                 <!-- Commit history will be populated here -->

@@ -1,10 +1,12 @@
 # Chromium Build Tracker
 
-Tracks changes in Chromium build instructions and key files that might affect your custom Chromium builds.
+Tracks changes in Chromium, V8, and depot_tools build instructions and key files that might affect your custom builds.
 
-## What it tracks
+## Tracked Repositories
 
-**Chromium build documentation:**
+### 1. Chromium (13 files tracked)
+
+**Build documentation:**
 - `docs/linux/build_instructions.md` - Linux build setup
 - `docs/mac_build_instructions.md` - macOS build setup
 - `docs/windows_build_instructions.md` - Windows build setup
@@ -22,8 +24,39 @@ Tracks changes in Chromium build instructions and key files that might affect yo
 - `build/install-build-deps.py` - Linux dependency installer (Python)
 - `build/vs_toolchain.py` - Windows Visual Studio setup
 - `build/mac_toolchain.py` - macOS Xcode setup
+- `.vpython3` - Python virtual environment configuration
 
-**Total: 12 files tracked** (4 docs + 8 critical build files)
+**Data sources:**
+- GitHub: https://github.com/chromium/chromium (mirror, sometimes stale)
+- Gitiles: https://chromium.googlesource.com/chromium/src (official, always current)
+
+### 2. V8 Engine (6 files tracked)
+
+**Core build and development files:**
+- `README.md` - V8 overview and build instructions
+- `DEPS` - V8 dependencies
+- `BUILD.gn` - Main GN build configuration
+- `infra/mb/mb_config.pyl` - Multi-build configuration
+- `tools/dev/gm.py` - Build tool helper
+- `tools/dev/v8gen.py` - V8 build configuration generator
+
+**Data sources:**
+- GitHub: https://github.com/v8/v8 (mirror, sometimes stale)
+- Gitiles: https://chromium.googlesource.com/v8/v8 (official, always current)
+
+### 3. depot_tools (6 files tracked)
+
+**Key tool files:**
+- `README.md` - depot_tools documentation
+- `gclient.py` - Main checkout/sync tool
+- `gclient_utils.py` - Gclient utilities
+- `git_cl.py` - Code review tool
+- `autoninja.py` - Optimized ninja wrapper
+- `cipd_manifest.txt` - CIPD package manifest
+
+**Data sources:**
+- Gitiles: https://chromium.googlesource.com/chromium/tools/depot_tools (official, always current)
+- Note: No GitHub mirror exists for depot_tools
 
 ## Why this exists
 
@@ -97,10 +130,12 @@ The dashboard has **2 tabs**:
 - Diff viewer: Click "View Diff" to see exact changes
 
 **2. Commit History**
+- **Repository selector** - Choose between Chromium, V8 Engine, or depot_tools
 - **Interactive date range picker** - Query any time period
 - **Quick ranges** - Last 7/30/90 days with one click
 - **Hybrid API approach** - Automatically uses GitHub (fast) when fresh, falls back to Gitiles (slow but always current) when stale
 - **Smart source selection** - Checks GitHub mirror freshness and switches to Gitiles if outdated
+- **Live logging panel** - See which API is being used and why in real-time
 - **Grouped by file** - See commits organized by document
 - No authentication required
 
@@ -231,16 +266,23 @@ The dashboard uses a **hybrid approach** for fetching commit history:
 ### GitHub API (Primary - Fast)
 - **Speed**: ~2-3 seconds for all files
 - **When used**: When GitHub mirror is fresh (commits within last 3 days)
-- **Limitation**: GitHub mirror occasionally goes stale for days/weeks
+- **Availability**:
+  - ✓ Chromium: https://github.com/chromium/chromium
+  - ✓ V8: https://github.com/v8/v8
+  - ✗ depot_tools: No mirror exists
+- **Limitation**: GitHub mirrors occasionally go stale for days/weeks
 - **No auth required**: Works without tokens (60 requests/hour limit is plenty)
 
 ### Gitiles API (Fallback - Slow but Reliable)
 - **Speed**: ~10-15 seconds for all files
-- **When used**: When GitHub mirror is stale or unavailable
-- **Source**: chromium.googlesource.com (official Chromium repository)
+- **When used**: When GitHub mirror is stale, unavailable, or doesn't exist
+- **Sources**:
+  - Chromium: https://chromium.googlesource.com/chromium/src
+  - V8: https://chromium.googlesource.com/v8/v8
+  - depot_tools: https://chromium.googlesource.com/chromium/tools/depot_tools (only option)
 - **Reliability**: Always up-to-date (source of truth)
 
-The dashboard automatically detects which source to use and shows you which one was used in the status message.
+The dashboard automatically detects which source to use and shows you which one was used in the live logging panel and status message.
 
 ## Future improvements
 
