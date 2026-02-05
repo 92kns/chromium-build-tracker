@@ -9,6 +9,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to push to gh-pages
 
     steps:
       - name: Checkout repository
@@ -26,11 +28,11 @@ jobs:
           git checkout gh-pages
 
           # Copy updated files from main
-          git checkout main -- dashboard/index.html dashboard/app.js dashboard/styles.css data/changes.json
+          git checkout main -- dashboard/index.html dashboard/app.js dashboard/styles.css
 
           # Move dashboard files to root
           mv dashboard/* . 2>/dev/null || true
-          rm -rf dashboard data
+          rm -rf dashboard
 
           # Commit and push if there are changes
           git add .
