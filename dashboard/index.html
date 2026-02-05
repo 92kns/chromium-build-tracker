@@ -10,55 +10,10 @@
     <div class="container">
         <header>
             <h1>🔧 Chromium Build Tracker</h1>
-            <p class="subtitle">Tracking changes in Chromium build instructions</p>
+            <p class="subtitle">Commit history for Chromium, V8, and depot_tools</p>
         </header>
 
-        <!-- Tab Navigation -->
-        <div class="tabs">
-            <button class="tab-btn" data-tab="tracked">Tracked Changes</button>
-            <button class="tab-btn active" data-tab="history">Commit History</button>
-        </div>
-
-        <!-- Tracked Changes Tab -->
-        <div id="tracked-tab" class="tab-content">
-            <div id="stats" class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number" id="total-changes">0</div>
-                    <div class="stat-label">Total Changes</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="chromium-changes">0</div>
-                    <div class="stat-label">Chromium Docs</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="depot-tools-changes">0</div>
-                    <div class="stat-label">depot_tools</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="last-check">Never</div>
-                    <div class="stat-label">Last Check</div>
-                </div>
-            </div>
-
-            <div class="filters">
-                <button class="filter-btn active" data-filter="all">All</button>
-                <button class="filter-btn" data-filter="chromium">Chromium</button>
-                <button class="filter-btn" data-filter="depot_tools">depot_tools</button>
-                <button class="filter-btn" data-filter="added">Added</button>
-                <button class="filter-btn" data-filter="modified">Modified</button>
-                <button class="filter-btn" data-filter="removed">Removed</button>
-            </div>
-
-            <div id="changes-list" class="changes-list">
-                <!-- Changes will be populated here -->
-            </div>
-
-            <div id="no-changes" class="no-changes" style="display: none;">
-                <p>No changes detected yet. Run <code>python scraper/main.py fetch</code> to start tracking.</p>
-            </div>
-        </div>
-
-        <!-- Commit History Tab -->
+        <!-- Commit History -->
         <div id="history-tab" class="tab-content active">
             <div class="history-controls">
                 <div class="repo-selector-group">
@@ -101,15 +56,6 @@
             </div>
         </div>
 
-    </div>
-
-    <div id="diff-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <div id="diff-viewer">
-                <!-- Diff will be displayed here -->
-            </div>
-        </div>
     </div>
 
     <script src="app.js"></script>

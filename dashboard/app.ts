@@ -360,24 +360,39 @@ class HybridAPI {
         this.gitilesAPI = new GitilesAPI(config);
     }
 
-    async fetchAllCommits(since?: string, until?: string, onProgress?: (current: number, total: number, source: APISource) => void): Promise<{ commits: Map<string, Commit[]>, source: APISource }> {
+    async fetchAllCommits(since?: string, until?: string, signal?: AbortSignal, onProgress?: (current: number, total: number, source: APISource) => void): Promise<{ commits: Map<string, Commit[]>, source: APISource }> {
         this.logger.log(`Fetching commits for ${this.config.name}`, 'info');
+
+        // Check if cancelled
+        if (signal?.aborted) {
+            throw new DOMException('Fetch aborted', 'AbortError');
+        }
 
         // Try GitHub first (if available)
         if (this.config.github) {
             try {
                 this.logger.log('Checking GitHub mirror status...', 'info');
+
+                // Check if cancelled
+                if (signal?.aborted) {
+                    throw new DOMException('Fetch aborted', 'AbortError');
+                }
+
                 const isStale = await this.githubAPI.checkIfStale();
 
                 if (!isStale) {
                     this.logger.log('GitHub mirror is fresh - using GitHub API (fast)', 'success');
-                    const commits = await this.fetchFromGitHub(since, until, onProgress);
+                    const commits = await this.fetchFromGitHub(since, until, signal, onProgress);
                     this.logger.log(`Fetched ${commits.size} files with commits from GitHub`, 'success');
                     return { commits, source: 'github' };
                 } else {
                     this.logger.log('GitHub mirror is stale (>3 days old) - falling back to Gitiles', 'warning');
                 }
             } catch (error) {
+                // Re-throw abort errors
+                if (error instanceof DOMException && error.name === 'AbortError') {
+                    throw error;
+                }
                 this.logger.log(`GitHub API failed: ${error}`, 'error');
                 this.logger.log('Falling back to Gitiles API', 'warning');
             }
@@ -385,16 +400,23 @@ class HybridAPI {
             this.logger.log('No GitHub mirror available - using Gitiles only', 'info');
         }
 
+        // Check if cancelled before Gitiles
+        if (signal?.aborted) {
+            throw new DOMException('Fetch aborted', 'AbortError');
+        }
+
         // Fallback to Gitiles (or primary if no GitHub)
         this.logger.log('Using Gitiles API (slower but always current)', 'info');
         const commits = await this.gitilesAPI.fetchAllCommits(since, until, (current, total) => {
+            // Check if cancelled during fetch
+            if (signal?.aborted) return;
             if (onProgress) onProgress(current, total, 'gitiles');
         });
         this.logger.log(`Fetched ${commits.size} files with commits from Gitiles`, 'success');
         return { commits, source: 'gitiles' };
     }
 
-    private async fetchFromGitHub(since?: string, until?: string, onProgress?: (current: number, total: number, source: APISource) => void): Promise<Map<string, Commit[]>> {
+    private async fetchFromGitHub(since?: string, until?: string, signal?: AbortSignal, onProgress?: (current: number, total: number, source: APISource) => void): Promise<Map<string, Commit[]>> {
         const results = new Map<string, Commit[]>();
         const concurrency = 3;
         const files = [...this.config.files];
@@ -403,10 +425,18 @@ class HybridAPI {
         console.log(`[${this.config.name}] Fetching ${files.length} files from GitHub...`);
 
         for (let i = 0; i < files.length; i += concurrency) {
+            // Check if cancelled before each batch
+            if (signal?.aborted) {
+                throw new DOMException('Fetch aborted', 'AbortError');
+            }
+
             const batch = files.slice(i, i + concurrency);
             const promises = batch.map(filePath =>
                 this.githubAPI.fetchCommits(filePath, since, until)
                     .then(commits => {
+                        // Check if cancelled
+                        if (signal?.aborted) return;
+
                         if (commits.length > 0) {
                             results.set(filePath, commits);
                         }
@@ -416,6 +446,9 @@ class HybridAPI {
                         }
                     })
                     .catch(error => {
+                        // Don't log errors if aborted
+                        if (signal?.aborted) return;
+
                         console.error(`[${this.config.name}] Failed to fetch ${filePath}:`, error);
                         completed++;
                         if (onProgress) {
@@ -432,11 +465,10 @@ class HybridAPI {
 }
 
 class Dashboard {
-    private changes: Change[] = [];
-    private currentFilter: string = 'all';
     private hybridAPI: HybridAPI;
     private currentRepo: RepoConfig;
     private logger: Logger;
+    private currentFetchAbort: AbortController | null = null;
 
     constructor() {
         this.logger = new Logger();
@@ -446,15 +478,8 @@ class Dashboard {
     }
 
     async init() {
-        this.setupTabs();
         this.setupRepoSelector();
         this.setupHistoryControls();
-
-        // Load tracked changes
-        await this.loadChanges();
-        this.updateStats();
-        this.renderChanges();
-        this.setupChangeListeners();
     }
 
     setupRepoSelector() {
@@ -550,18 +575,44 @@ class Dashboard {
 
         if (!statusDiv || !historyList || !noHistory) return;
 
+        // Cancel any in-flight request
+        if (this.currentFetchAbort) {
+            this.currentFetchAbort.abort();
+            this.logger.log('⚠ Previous fetch cancelled', 'warning');
+        }
+
+        // Create new abort controller for this fetch
+        this.currentFetchAbort = new AbortController();
+        const signal = this.currentFetchAbort.signal;
+
         // Clear logs and show loading
         this.logger.clear();
+        this.logger.log(`Starting fetch for ${this.currentRepo.name}`, 'info');
         statusDiv.textContent = 'Checking GitHub mirror status...';
         statusDiv.className = 'history-status loading';
         historyList.innerHTML = '';
         noHistory.style.display = 'none';
 
         try {
-            const { commits, source } = await this.hybridAPI.fetchAllCommits(since, until, (current, total, apiSource) => {
+            // Check if cancelled before starting
+            if (signal.aborted) {
+                this.logger.log('Fetch cancelled before starting', 'warning');
+                return;
+            }
+
+            const { commits, source } = await this.hybridAPI.fetchAllCommits(since, until, signal, (current, total, apiSource) => {
+                // Check if cancelled during progress
+                if (signal.aborted) return;
+
                 const sourceName = apiSource === 'github' ? 'GitHub' : 'Gitiles';
                 statusDiv.textContent = `Fetching from ${sourceName}... (${current}/${total})`;
             });
+
+            // Check if cancelled after fetch
+            if (signal.aborted) {
+                this.logger.log('Fetch cancelled after completion', 'warning');
+                return;
+            }
 
             if (commits.size === 0) {
                 statusDiv.textContent = 'No commits found in the specified date range.';
@@ -582,9 +633,31 @@ class Dashboard {
             this.renderHistory(commits);
 
         } catch (error) {
+            // Don't show error if it was just an abort
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                this.logger.log('Fetch was cancelled', 'warning');
+                statusDiv.textContent = 'Fetch cancelled';
+                statusDiv.className = 'history-status warning';
+                return;
+            }
+
+            // Check if signal was aborted (might not throw AbortError in all cases)
+            if (signal.aborted) {
+                this.logger.log('Fetch was cancelled', 'warning');
+                statusDiv.textContent = 'Fetch cancelled';
+                statusDiv.className = 'history-status warning';
+                return;
+            }
+
+            this.logger.log(`Error: ${(error as Error).message}`, 'error');
             statusDiv.textContent = `Error: ${(error as Error).message}`;
             statusDiv.className = 'history-status error';
             noHistory.style.display = 'block';
+        } finally {
+            // Clear abort controller if this was the current one
+            if (this.currentFetchAbort?.signal === signal) {
+                this.currentFetchAbort = null;
+            }
         }
     }
 
@@ -649,167 +722,6 @@ class Dashboard {
 
             historyList.appendChild(fileGroup);
         }
-    }
-
-    // Tracked Changes (existing functionality)
-    async loadChanges() {
-        try {
-            const response = await fetch('../data/changes.json');
-            if (response.ok) {
-                this.changes = await response.json();
-                this.changes.sort((a, b) =>
-                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-                );
-            }
-        } catch (error) {
-            console.warn('No changes file found or error loading:', error);
-            this.changes = [];
-        }
-    }
-
-    updateStats() {
-        const totalChanges = this.changes.length;
-        const chromiumChanges = this.changes.filter(c => c.repo === 'chromium').length;
-        const depotToolsChanges = this.changes.filter(c => c.repo === 'depot_tools').length;
-
-        let lastCheck = 'Never';
-        if (this.changes.length > 0) {
-            const latest = new Date(this.changes[0].timestamp);
-            lastCheck = this.formatDate(latest);
-        }
-
-        document.getElementById('total-changes')!.textContent = totalChanges.toString();
-        document.getElementById('chromium-changes')!.textContent = chromiumChanges.toString();
-        document.getElementById('depot-tools-changes')!.textContent = depotToolsChanges.toString();
-        document.getElementById('last-check')!.textContent = lastCheck;
-    }
-
-    renderChanges() {
-        const changesList = document.getElementById('changes-list')!;
-        const noChanges = document.getElementById('no-changes')!;
-
-        const filteredChanges = this.filterChanges();
-
-        if (filteredChanges.length === 0) {
-            changesList.style.display = 'none';
-            noChanges.style.display = 'block';
-            return;
-        }
-
-        changesList.style.display = 'flex';
-        noChanges.style.display = 'none';
-
-        changesList.innerHTML = filteredChanges.map(change => this.renderChangeCard(change)).join('');
-    }
-
-    filterChanges(): Change[] {
-        if (this.currentFilter === 'all') {
-            return this.changes;
-        }
-
-        return this.changes.filter(change => {
-            if (this.currentFilter === 'chromium' || this.currentFilter === 'depot_tools') {
-                return change.repo === this.currentFilter;
-            }
-            return change.type === this.currentFilter;
-        });
-    }
-
-    renderChangeCard(change: Change): string {
-        const timestamp = this.formatTimestamp(change.timestamp);
-        const diffButton = change.diff_html
-            ? `<button class="btn btn-primary view-diff" data-file="${change.file}" data-timestamp="${change.timestamp}">View Diff</button>`
-            : '';
-
-        return `
-            <div class="change-card" data-repo="${change.repo}" data-type="${change.type}">
-                <div class="change-header">
-                    <div class="change-title">
-                        <span class="change-type ${change.type}">${change.type}</span>
-                        <span class="repo-badge">${change.repo}</span>
-                    </div>
-                    <div class="change-meta">
-                        <span class="change-timestamp">${timestamp}</span>
-                    </div>
-                </div>
-                <div class="change-file">${change.file}</div>
-                <div class="change-summary">${change.summary}</div>
-                <div class="change-actions">
-                    ${diffButton}
-                    ${change.url ? `<a href="${change.url}" target="_blank" class="btn">View Source</a>` : ''}
-                </div>
-            </div>
-        `;
-    }
-
-    setupChangeListeners() {
-        // Filter buttons
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const target = e.target as HTMLElement;
-                const filter = target.dataset.filter || 'all';
-
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                target.classList.add('active');
-
-                this.currentFilter = filter;
-                this.renderChanges();
-            });
-        });
-
-        // Diff modal
-        const modal = document.getElementById('diff-modal')!;
-        const closeBtn = document.querySelector('.close')!;
-
-        closeBtn.addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-
-        window.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-
-        // View diff buttons
-        document.getElementById('changes-list')!.addEventListener('click', (e) => {
-            const target = e.target as HTMLElement;
-            if (target.classList.contains('view-diff')) {
-                const file = target.dataset.file!;
-                const timestamp = target.dataset.timestamp!;
-                this.showDiff(file, timestamp);
-            }
-        });
-    }
-
-    showDiff(file: string, timestamp: string) {
-        const change = this.changes.find(c => c.file === file && c.timestamp === timestamp);
-
-        if (!change || !change.diff_html) {
-            return;
-        }
-
-        const modal = document.getElementById('diff-modal')!;
-        const diffViewer = document.getElementById('diff-viewer')!;
-
-        diffViewer.innerHTML = `
-            <h2>${file}</h2>
-            <p style="color: #8b949e; margin-bottom: 20px;">${change.summary} - ${this.formatTimestamp(change.timestamp)}</p>
-            ${change.diff_html}
-        `;
-
-        modal.style.display = 'block';
-    }
-
-    formatTimestamp(timestamp: string): string {
-        const date = new Date(timestamp);
-        return date.toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
     }
 
     formatDate(date: Date): string {

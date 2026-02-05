@@ -98,19 +98,7 @@ This creates the first snapshot. Subsequent runs will detect changes.
 
 ## Usage
 
-### Fetch latest changes
-
-```bash
-python3 scraper/main.py fetch
-```
-
-This will:
-- Fetch current versions of tracked files
-- Compare with previous snapshot
-- Detect and log any changes
-- Save new snapshot
-
-### View the dashboard
+### Start the dashboard
 
 ```bash
 python3 scraper/main.py serve
@@ -118,80 +106,44 @@ python3 scraper/main.py serve
 
 This will:
 - Compile TypeScript (if needed)
-- Start local HTTP server on port 8000
+- Start local HTTP server with Gitiles proxy on port 8000
 - Open dashboard in your browser
 
-The dashboard has **2 tabs**:
+### Using the dashboard
 
-**1. Tracked Changes** - Snapshot-based tracking
-- Stats: Total changes, changes by repo, last check time
-- Filters: View all or filter by type (added/modified/removed)
-- Change cards with summaries and links
-- Diff viewer: Click "View Diff" to see exact changes
+1. **Select a repository** - Choose Chromium, V8 Engine, or depot_tools from the dropdown
+2. **Pick a date range** - Use quick ranges (7/30/90 days) or custom dates
+3. **Fetch history** - Click "Fetch History" to query commits
+4. **View results** - See commits grouped by file with live API logs
 
-**2. Commit History**
-- **Repository selector** - Choose between Chromium, V8 Engine, or depot_tools
-- **Interactive date range picker** - Query any time period
-- **Quick ranges** - Last 7/30/90 days with one click
-- **Hybrid API approach** - Automatically uses GitHub (fast) when fresh, falls back to Gitiles (slow but always current) when stale
-- **Smart source selection** - Checks GitHub mirror freshness and switches to Gitiles if outdated
-- **Live logging panel** - See which API is being used and why in real-time
-- **Grouped by file** - See commits organized by document
-- No authentication required
+**Features:**
+- **Repository selector** - Switch between Chromium (13 files), V8 (6 files), or depot_tools (6 files)
+- **Hybrid API** - Automatically uses GitHub (fast) or Gitiles (reliable) based on mirror freshness
+- **Live logging** - See which API is being used and why in real-time
+- **Request cancellation** - Switch repos without mixed results
+- **Direct links** - Click through to view commits on GitHub/Gitiles
 
-### Fetch and view in one command
-
-```bash
-python3 scraper/main.py fetch --serve
-```
-
-### View commit history (NEW!)
-
-This is super useful for correlating CI breaks with documentation changes:
-
-```bash
-# View all commits from the last month
-python3 scraper/main.py history --since "2024-10-01" --until "2024-11-01"
-
-# View recent commits (no date filter)
-python3 scraper/main.py history --limit 50
-
-# Save to file for later analysis
-python3 scraper/main.py history --since "2024-10-01" --output changes.txt
-```
-
-**Example output:**
-```
-docs/windows_build_instructions.md
-==================================
-2 commits:
-
-  0d018f5 - 2024-11-18 11:10
-    Henrique Ferreiro: Remove recommendation to disable pgo with cc_wrapper on Windows
-    https://github.com/chromium/chromium/commit/0d018f5...
-
-  ea1232d - 2024-10-31 17:01
-    Devon Loehr: Revert "Update windows SDK version to 10.0.26100.1742"
-    https://github.com/chromium/chromium/commit/ea1232d...
-```
-
-**Common use cases:**
-- Your CI broke on Nov 15? Check what changed: `--since "2024-11-01" --until "2024-11-20"`
-- Building on Windows and getting weird errors? Check Windows docs: just grep the output
-- Weekly review of all changes: `--since "$(date -d '7 days ago' +%Y-%m-%d)"`
 
 ## How it works
 
-1. **Scraper** fetches markdown files from Chromium's GitHub mirror
-2. **Detector** compares with previous snapshot (stored in `data/snapshots/`)
-3. **Diff generator** creates HTML diffs for modified files
-4. **Changes log** stores all detected changes in `data/changes.json`
-5. **Dashboard** reads the changes and displays them with filters and diffs
-6. **Hybrid API** - Commit history feature automatically chooses the best data source:
+The dashboard uses a **Hybrid API** to fetch commit history:
+
+1. **Smart source selection**:
    - Tries GitHub API first (much faster, ~2-3 seconds)
    - Checks if GitHub mirror is fresh (commits within last 3 days)
    - Falls back to Gitiles API if GitHub is stale or unavailable (~10-15 seconds)
-   - Dashboard shows which source was used: "via GitHub (faster)" or "via Gitiles (slower but up-to-date)"
+   - For depot_tools: Uses Gitiles only (no GitHub mirror exists)
+
+2. **Request handling**:
+   - Python proxy server handles Gitiles CORS issues
+   - Parallel fetching (3 files at a time) for better performance
+   - Request cancellation prevents mixed results when switching repos
+   - Live logging panel shows API decisions in real-time
+
+3. **Display**:
+   - Commits grouped by file
+   - Filter by date range (custom or quick ranges)
+   - Direct links to view commits on GitHub or Gitiles
 
 
 

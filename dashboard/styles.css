@@ -715,3 +715,7 @@ h1 {
     color: #6e7681;
     margin-right: 8px;
 }
+
+.history-status.warning {
+    color: #d29922;
+}
